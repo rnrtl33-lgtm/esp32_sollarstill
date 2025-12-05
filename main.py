@@ -1,249 +1,209 @@
-print("=== main.py started ===")
-time.sleep(1)
 print("main.py running...")
 print("Initializing I2C buses...")
 
 from machine import Pin, SoftI2C
-from time import sleep, localtime, ticks_ms, ticks_diff
+from time import sleep, ticks_ms, ticks_diff
 import urequests
 import time
 
-# ======================================================
-#  CONFIG: ThingSpeak API keys
-# ======================================================
+# ==========================================================
+#  CONFIG: ThingSpeak API KEYS
+# ==========================================================
+
 API_A = "EU6EE36IJ7WSVYP3"
-API_B = "E8CTAK8MCUWLVQJ2"
+API_B = "E8CTAK8MCUWLQVJ2"
 API_C = "Y1FWSOX7Z6YZ8QMU"
 API_W = "HG8GG8DF40LCGV99"
 
+TS_URL = "https://api.thingspeak.com/update"
 
-# ======================================================
-#  Safe sender to ThingSpeak (never crashes)
-# ======================================================
-def send_to_thingspeak(api_key, fields):
-    url = "https://api.thingspeak.com/update"
-    payload = "api_key=" + api_key
-    for i, v in enumerate(fields, start=1):
-        if v is None:
-            v = 0
-        payload += "&field{}={}".format(i, v)
+# ==========================================================
+#  SAFE SEND TO THINGSPEAK
+# ==========================================================
+
+def send_to_ts(api_key, fields):
     try:
-        r = urequests.post(url, data=payload)
+        payload = "api_key=" + api_key
+        for i, v in enumerate(fields, start=1):
+            if v is None:
+                v = 0
+            payload += "&field{}={}".format(i, v)
+
+        r = urequests.post(TS_URL, data=payload)
         r.close()
         print("→ TS:", api_key[:6], fields)
     except Exception as e:
         print("TS error:", e)
 
+# ==========================================================
+#  I2C BUS INITIALIZATION
+# ==========================================================
 
-# ======================================================
-#   I2C Bus Setup
-# ======================================================
 i2c_A1 = SoftI2C(sda=Pin(19), scl=Pin(18), freq=100000)
 i2c_A2 = SoftI2C(sda=Pin(23), scl=Pin(5),  freq=100000)
 
 i2c_B1 = SoftI2C(sda=Pin(25), scl=Pin(26), freq=100000)
 i2c_B2 = SoftI2C(sda=Pin(27), scl=Pin(14), freq=100000)
 
-i2c_C1 = SoftI2C(sda=Pin(32), scl=Pin(0),  freq=50000)
-i2c_C2 = SoftI2C(sda=Pin(15), scl=Pin(2),  freq=50000)
+i2c_C1 = SoftI2C(sda=Pin(32), scl=Pin(0),  freq=80000)
+i2c_C2 = SoftI2C(sda=Pin(15), scl=Pin(2),  freq=100000)
 
 print("I2C ready.")
 
+# ==========================================================
+#  IMPORT SENSOR DRIVERS
+# ==========================================================
 
-# ======================================================
-#   Import SHT30 (Temperature)
-# ======================================================
 from lib.sht30 import SHT30
+from lib.hx711 import HX711
+from lib.ltr390 import ltr_init_uv, ltr_read_uv
+from lib.tsl2591 import TSL2591
+from lib.vl53l0x_simple import vl_read
 
-# Model A
+# ==========================================================
+#  SENSOR OBJECTS
+# ==========================================================
+
+# ------ Model A ------
 sht_air_A = SHT30(i2c_A2, addr=0x45)
 sht_w2_A  = SHT30(i2c_A2, addr=0x44)
-sht_amb   = SHT30(i2c_A1, addr=0x45)
+sht_amb_A = SHT30(i2c_A1, addr=0x45)
 
-# Model B
+tsl_A = TSL2591(i2c_A2)
+uv_A  = i2c_A1
+dist_A = i2c_A1
+hxA = HX711(34, 33)
+
+# ------ Model B ------
 sht_air_B = SHT30(i2c_B2, addr=0x45)
 sht_w2_B  = SHT30(i2c_B2, addr=0x44)
 
-# Model C
+tsl_B = TSL2591(i2c_B2)
+uv_B  = i2c_B1
+dist_B = i2c_B1
+hxB = HX711(35, 33)
+
+# ------ Model C ------
 sht_air_C = SHT30(i2c_C2, addr=0x45)
 sht_w2_C  = SHT30(i2c_C2, addr=0x44)
 
+tsl_C = TSL2591(i2c_C2)
+uv_C  = i2c_C1
+dist_C = i2c_C1
+hxC = HX711(36, 33)
 
-def safe_read_sht(sht):
+# ------ Wind ------
+wind_pin = Pin(13, Pin.IN)
+
+# ==========================================================
+#  SAFE READ FUNCTIONS (NEVER CRASH)
+# ==========================================================
+
+def safe_sht(s):
     try:
-        t, rh = sht.measure()
-        return t, rh
+        return s.measure()
     except:
-        return 0, 0
+        return None, None
 
+def safe_uv(i2c_bus):
+    try:
+        uvs, uvi = ltr_read_uv(i2c_bus)
+        return uvs, uvi
+    except:
+        return None, None
 
-# ======================================================
-#   Load Cell HX711 (Mass)
-# ======================================================
-from lib.hx711 import HX711
+def safe_tsl(t):
+    try:
+        return t.read_ir_lux()
+    except:
+        return None, None
 
-hxA = HX711(34, 33); hxA.set_scale(1.0)
-hxB = HX711(35, 33); hxB.set_scale(1.0)
-hxC = HX711(36, 33); hxC.set_scale(1.0)
-
-try:
-    hxA.tare(); hxB.tare(); hxC.tare()
-except:
-    pass
+def safe_dist(i2c_bus):
+    try:
+        d = vl_read(i2c_bus)
+        return d
+    except:
+        return None
 
 def safe_mass(hx):
     try:
         return hx.get_units(5)
     except:
-        return 0
-
-
-# ======================================================
-#  LTR390 UV Sensor
-# ======================================================
-LTR = 0x53
-def ltr_read(bus):
-    try:
-        bus.writeto_mem(LTR, 0x00, b'\x06')
-        sleep(0.05)
-        data = bus.readfrom_mem(LTR, 0x10, 3)
-        uv = data[0] | (data[1] << 8) | (data[2] << 16)
-        return uv, uv / 2300
-    except:
-        return 0, 0
-
-
-# ======================================================
-#  TSL2591 LIGHT SENSOR (IR + Lux)
-# ======================================================
-from lib.tsl2591 import TSL2591
-
-tsl_A = TSL2591(i2c_A2)
-tsl_B = TSL2591(i2c_B2)
-tsl_C = TSL2591(i2c_C2)
-
-def safe_tsl(tsl):
-    try:
-        return tsl.read_ir_lux()
-    except:
-        return 0, 0
-
-
-# ======================================================
-#  VL53L0X Distance
-# ======================================================
-def vl_read(bus):
-    try:
-        bus.writeto_mem(0x29, 0x00, b'\x01')
-        sleep(0.05)
-        hi = bus.readfrom_mem(0x29, 0x1E, 1)[0]
-        lo = bus.readfrom_mem(0x29, 0x1F, 1)[0]
-        return (hi << 8) | lo
-    except:
-        return 0
-
-
-# ======================================================
-#  Wind speed sensor
-# ======================================================
-wind_pin = Pin(13, Pin.IN)
-wind_count = 0
-last_ms = ticks_ms()
-
-def wind_irq(pin):
-    global wind_count
-    wind_count += 1
-
-wind_pin.irq(trigger=Pin.IRQ_FALLING, handler=wind_irq)
+        return None
 
 def read_wind():
-    global wind_count, last_ms
-    now = ticks_ms()
-    dt = ticks_diff(now, last_ms) / 1000
-    if dt <= 0:
-        return 0, None
-    pulses = wind_count
-    wind_count = 0
-    last_ms = now
-    speed = pulses * 1.0
-    return speed, None
-
-
-# ======================================================
-#  Formatting helper
-# ======================================================
-def fmt(x, w=6, p=2):
     try:
-        return ("{:"+str(w)+"."+str(p)+"f}").format(x)
+        return wind_pin.value()
     except:
-        return "   0.00"
+        return 0
 
+# ==========================================================
+#  TABLE DISPLAY HELPER
+# ==========================================================
 
-# ======================================================
-#  Print Header
-# ======================================================
-print("""
-==================== SENSOR TABLE ====================
-[A] T_air | T_w2 | Tamb | UV | UVI | IR | Lux | Dist | Mass
-[B] T_air | T_w2 | UV | UVI | IR | Lux | Dist | Mass
-[C] T_air | T_w2 | UV | UVI | IR | Lux | Dist | Mass
-[W] Wind Speed
-=======================================================
-""")
+def print_table(A, B, C, W):
+    print("\n================ SENSOR DATA ================")
+    print("[A]", A)
+    print("[B]", B)
+    print("[C]", C)
+    print("[W] Wind =", W)
+    print("=============================================\n")
 
+# ==========================================================
+#  MAIN LOOP (30 seconds)
+# ==========================================================
 
-# ======================================================
-#  MAIN LOOP (every 30 seconds)
-# ======================================================
-PERIOD = 30
-print("Starting sensor loop...\n")
+print("\nStarting loop...\n")
 
 while True:
 
-    # MODEL A
-    Ta,_    = safe_read_sht(sht_air_A)
-    Tw2a,_  = safe_read_sht(sht_w2_A)
-    Tamb,_  = safe_read_sht(sht_amb)
-    uvA,uviA = ltr_read(i2c_A1)
-    irA,luxA = safe_tsl(tsl_A)
-    distA    = vl_read(i2c_A1)
-    massA    = safe_mass(hxA)
+    # -------- Model A --------
+    TaA, RhA = safe_sht(sht_air_A)
+    TwA, RwA = safe_sht(sht_w2_A)
+    Tamb, Ramb = safe_sht(sht_amb_A)
+    uvsA, uviA = safe_uv(uv_A)
+    irA, luxA  = safe_tsl(tsl_A)
+    dA = safe_dist(dist_A)
+    mA = safe_mass(hxA)
 
-    # MODEL B
-    Tb,_    = safe_read_sht(sht_air_B)
-    Tw2b,_  = safe_read_sht(sht_w2_B)
-    uvB,uviB = ltr_read(i2c_B1)
-    irB,luxB = safe_tsl(tsl_B)
-    distB    = vl_read(i2c_B1)
-    massB    = safe_mass(hxB)
+    A_fields = [TaA, TwA, Tamb, uvsA, uviA, irA, luxA, dA, mA]
 
-    # MODEL C
-    Tc,_    = safe_read_sht(sht_air_C)
-    Tw2c,_  = safe_read_sht(sht_w2_C)
-    uvC,uviC = ltr_read(i2c_C1)
-    irC,luxC = safe_tsl(tsl_C)
-    distC    = vl_read(i2c_C1)
-    massC    = safe_mass(hxC)
+    # -------- Model B --------
+    TaB, RhB = safe_sht(sht_air_B)
+    TwB, RwB = safe_sht(sht_w2_B)
+    uvsB, uviB = safe_uv(uv_B)
+    irB, luxB  = safe_tsl(tsl_B)
+    dB = safe_dist(dist_B)
+    mB = safe_mass(hxB)
 
-    # WIND
-    wind_speed, wind_dir = read_wind()
+    B_fields = [TaB, TwB, uvsB, uviB, irB, luxB, dB, mB]
 
-    # PRINT TABLE
-    print("-------------------------------------------------------")
-    print(f"[A] {fmt(Ta)} | {fmt(Tw2a)} | {fmt(Tamb)} | {fmt(uvA,5,0)} | {fmt(uviA,5,2)} | {fmt(irA,6,0)} | {fmt(luxA,6,0)} | {fmt(distA,6,0)} | {fmt(massA,6,2)}")
-    print(f"[B] {fmt(Tb)} | {fmt(Tw2b)} | {fmt(uvB,5,0)} | {fmt(uviB,5,2)} | {fmt(irB,6,0)} | {fmt(luxB,6,0)} | {fmt(distB,6,0)} | {fmt(massB,6,2)}")
-    print(f"[C] {fmt(Tc)} | {fmt(Tw2c)} | {fmt(uvC,5,0)} | {fmt(uviC,5,2)} | {fmt(irC,6,0)} | {fmt(luxC,6,0)} | {fmt(distC,6,0)} | {fmt(massC,6,2)}")
-    print(f"[W] Wind Speed = {fmt(wind_speed,6,2)}")
-    print("-------------------------------------------------------\n")
+    # -------- Model C --------
+    TaC, RhC = safe_sht(sht_air_C)
+    TwC, RwC = safe_sht(sht_w2_C)
+    uvsC, uviC = safe_uv(uv_C)
+    irC, luxC  = safe_tsl(tsl_C)
+    dC = safe_dist(dist_C)
+    mC = safe_mass(hxC)
 
-    # SEND TO THINGSPEAK
-    send_to_thingspeak(API_A, [Tamb, uviA, distA, Ta, Tw2a, luxA, irA, massA])
-    send_to_thingspeak(API_B, [uviB, distB, Tb, Tw2b, massB, luxB, irB, None])
-    send_to_thingspeak(API_C, [uviC, distC, Tc, Tw2c, luxC, irC, massC, None])
-    send_to_thingspeak(API_W, [wind_speed, wind_dir])
+    C_fields = [TaC, TwC, uvsC, uviC, irC, luxC, dC, mC]
 
-    sleep(PERIOD)
-while True:
+    # -------- Wind --------
+    W_field = read_wind()
+
+    # -------- Print Table --------
+    print_table(A_fields, B_fields, C_fields, W_field)
+
+    # -------- Send to ThingSpeak --------
+    send_to_ts(API_A, A_fields)
+    send_to_ts(API_B, B_fields)
+    send_to_ts(API_C, C_fields)
+    send_to_ts(API_W, [W_field])
+
+    # -------- Wait 30 seconds --------
+    sleep(30)
+
+
     print("Running main.py loop...")
     time.sleep(5)
 
