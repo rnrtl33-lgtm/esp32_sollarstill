@@ -1,4 +1,4 @@
- print("main.py running...")
+print("main.py running...")
 print("Initializing I2C buses...")
 
 from machine import Pin, SoftI2C
