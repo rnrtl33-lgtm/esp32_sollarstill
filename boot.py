@@ -4,8 +4,8 @@ import network, urequests, os, machine, time
 # ==========================
 #     WIFI SETTINGS
 # ==========================
-SSID = "YOUR_WIFI_NAME"
-PASS = "YOUR_WIFI_PASSWORD"
+SSID = "HUAWEI-1006VE_Wi-Fi5"
+PASS = "FPdGG9N7"
 
 # ==========================
 #     OTA FILE SOURCE
