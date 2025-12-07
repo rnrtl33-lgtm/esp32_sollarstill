@@ -65,7 +65,7 @@ def safe_read(func, fallback=0):
 #  IMPORT SENSOR LIBRARIES
 # ==========================
 from lib.sht30 import SHT30
-from lib.vl53 import VL53L0X
+from lib.vl53l0x import VL53L0X
 from lib.ltr390 import LTR390
 from lib.tsl2591 import TSL2591
 from lib.hx711 import HX711
