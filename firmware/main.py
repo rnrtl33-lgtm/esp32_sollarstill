@@ -3,7 +3,7 @@ import network
 import urequests
 from machine import I2C, SoftI2C, Pin
 
-# استدعاء مكتبة LTR390 الجديدة
+# استدعاء مكتبة LTR390
 from lib.ltr390 import LTR390
 
 # ===============================
@@ -141,7 +141,7 @@ wind_pin.irq(trigger=Pin.IRQ_FALLING, handler=wind_irq)
 def get_wind_speed():
     global wind_pulses
     wind_pulses = 0
-    time.sleep(1)
+    time.sleep(1)  # measure pulses per second
     pps = wind_pulses
     return pps * 2.4   # km/h
 
@@ -154,9 +154,14 @@ API_B = "E8CTAK8MCUWLVQJ2"
 API_C = "Y1FWSOX7Z6YZ8QMU"
 API_W = "HG8GG8DF40LCGV99"
 
+# ===============================
+# FIXED send_ts FUNCTION
+# ===============================
+
 def send_ts(api, **fields):
     url = "https://api.thingspeak.com/update?api_key=" + api
     for k, v in fields.items():
+        k = str(k)   # ← الحل الذي يمنع الخطأ
         url += f"&field{k}={v}"
     try:
         r = urequests.get(url)
@@ -236,6 +241,7 @@ while True:
 
     print("Waiting 30s...")
     time.sleep(30)
+
 
 
 
