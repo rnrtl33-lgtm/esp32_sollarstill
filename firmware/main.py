@@ -1,5 +1,5 @@
 import time, network, urequests
-from machine import I2C, Pin
+from machine import I2C, SoftI2C, Pin
 from lib.sht30 import SHT30
 from lib.ltr390 import LTR390
 from lib.tsl2591 import TSL2591
@@ -22,89 +22,138 @@ def wifi():
 
 wifi()
 
-# -----------------------------
-# I2C Buses of Model A
-# -----------------------------
 print("MAIN STARTED")
 
-# A1 bus → SDA19 / SCL18
-i2c_A1 = I2C(0, scl=Pin(18), sda=Pin(19))
 
-# A2 bus → SDA23 / SCL5
-i2c_A2 = I2C(1, scl=Pin(5), sda=Pin(23))
+# =====================================================
+#                     I2C BUSES
+# =====================================================
 
-print("Init sensors...")
+# ----- A1 -----
+i2c_A1 = I2C(0, scl=Pin(18), sda=Pin(19))   # Hardware I2C
 
-# -----------------------------
-# Sensors A1
-# -----------------------------
-sht_ambient = SHT30(i2c_A1, addr=0x45)   # SHT30 Ambient
-ltr_a = LTR390(i2c_A1, addr=0x53)         # LTR390
-vl_a = VL53L0X(i2c_A1)                    # Distance
-vl_a.start()
+# ----- A2 -----
+i2c_A2 = I2C(1, scl=Pin(5), sda=Pin(23))    # Hardware I2C
 
-# -----------------------------
-# Sensors A2
-# -----------------------------
-sht_air = SHT30(i2c_A2, addr=0x45)        # SHT30 Air
-sht_water = SHT30(i2c_A2, addr=0x44)      # SHT30 Water
-tsl = TSL2591(i2c_A2)                     # TSL2591
+# ----- B1 -----
+i2c_B1 = SoftI2C(scl=Pin(26), sda=Pin(25))  # Soft I2C
+
+# ----- B2 -----
+i2c_B2 = SoftI2C(scl=Pin(14), sda=Pin(27))  # Soft I2C
 
 
-# -----------------------------
-# ThingSpeak
-# -----------------------------
-API_KEY = "EU6EE36IJ7WSVYP3"
+# =====================================================
+#                     SENSORS A
+# =====================================================
+
+print("Init sensors A...")
+
+# A1
+sht_ambient = SHT30(i2c_A1, addr=0x45)
+ltr_a = LTR390(i2c_A1, addr=0x53)
+vl_a = VL53L0X(i2c_A1)
+
+# A2
+sht_air = SHT30(i2c_A2, addr=0x45)
+sht_water = SHT30(i2c_A2, addr=0x44)
+tsl_a = TSL2591(i2c_A2)
+
+
+# =====================================================
+#                     SENSORS B
+# =====================================================
+
+print("Init sensors B...")
+
+# B1
+ltr_b = LTR390(i2c_B1, addr=0x53)
+vl_b = VL53L0X(i2c_B1)
+
+# B2
+sht_air_b = SHT30(i2c_B2, addr=0x45)
+sht_water_b = SHT30(i2c_B2, addr=0x44)
+tsl_b = TSL2591(i2c_B2)
+
+
+# =====================================================
+#                  THINGSPEAK API
+# =====================================================
+
+API_KEY = "EU6EE36IJ7WSVYP3"   # قناة A + B الآن في نفس القناة
 
 def send_data(params):
-    base = "https://api.thingspeak.com/update?api_key=" + API_KEY
-    for i, val in params.items():
-        base += f"&field{i}={val}"
+    url = "https://api.thingspeak.com/update?api_key=" + API_KEY
+    for field, val in params.items():
+        url += f"&field{field}={val}"
     try:
-        r = urequests.get(base)
+        r = urequests.get(url)
         print("TS:", r.text)
         r.close()
-    except:
-        print("ThingSpeak Error")
+    except Exception as e:
+        print("ThingSpeak ERR:", e)
 
 
-# -----------------------------
-# Loop
-# -----------------------------
+# =====================================================
+#                       LOOP
+# =====================================================
+
 while True:
     try:
-        # A1 readings
+        # ----------- A1 -----------
         t_amb, h_amb = sht_ambient.measure()
-        uv = ltr_a.read_uv()
-        als = ltr_a.read_lux()
-        dist = vl_a.read()
+        uv_a = ltr_a.read_uv()
+        lux_a = ltr_a.read_lux()
+        dist_a = vl_a.read()
 
-        # A2 readings
+        # ----------- A2 -----------
         t_air, h_air = sht_air.measure()
         t_water, h_water = sht_water.measure()
-        (vis, ir) = tsl.read()
+        vis_a, ir_a = tsl_a.read()
 
-        print("Ambient:", t_amb, h_amb)
-        print("Air:", t_air, h_air)
-        print("Water:", t_water, h_water)
-        print("UV:", uv, "Lux:", als)
-        print("Distance:", dist)
-        print("TSL:", vis, ir)
+        # ----------- B1 -----------
+        uv_b = ltr_b.read_uv()
+        lux_b = ltr_b.read_lux()
+        dist_b = vl_b.read()
 
+        # ----------- B2 -----------
+        t_air_b, h_air_b = sht_air_b.measure()
+        t_water_b, h_water_b = sht_water_b.measure()
+        vis_b, ir_b = tsl_b.read()
+
+        # Debug print
+        print("A1 Ambient:", t_amb, h_amb)
+        print("A1 LTR:", uv_a, lux_a)
+        print("A1 VL:", dist_a)
+        print("A2 Air:", t_air, h_air)
+        print("A2 Water:", t_water, h_water)
+        print("A2 TSL:", vis_a, ir_a)
+
+        print("B1 LTR:", uv_b, lux_b)
+        print("B1 VL:", dist_b)
+        print("B2 Air:", t_air_b, h_air_b)
+        print("B2 Water:", t_water_b, h_water_b)
+        print("B2 TSL:", vis_b, ir_b)
+
+        # Sending data
         send_data({
             1: t_amb,
-            2: h_amb,
-            3: t_air,
-            4: t_water,
-            5: uv,
-            6: als,
-            7: dist
+            2: t_air,
+            3: t_water,
+            4: uv_a,
+            5: lux_a,
+            6: dist_a,
+            7: t_air_b,
+            8: t_water_b,
+            9: uv_b,
+            10: lux_b,
+            11: dist_b
         })
 
     except Exception as e:
         print("ERR:", e)
 
-    time.sleep(20)   # ThingSpeak limit
+    time.sleep(20)
+
 
 
 
