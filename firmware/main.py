@@ -25,8 +25,8 @@ connect_wifi()
 # I2C for SHT30 (Model A1)
 i2c = I2C(0, scl=Pin(18), sda=Pin(19))
 
-# SHT30 (جرّب 0x44 أو 0x45 حسب حساسك)
-sht = SHT30(i2c, addr=0x45)
+# SHT30 correct address → 0x44
+sht = SHT30(i2c, addr=0x44)
 
 while True:
     try:
@@ -45,5 +45,8 @@ while True:
         print("ERROR:", e)
 
     time.sleep(10)
+
+
+   
 
 
