@@ -3,7 +3,7 @@ import network
 import urequests
 
 from lib.sht30 import SHT30
-from lib.ltr390 import LTR390
+#from lib.ltr390 import LTR390   # تم إلغاؤه نهائيًا
 from lib.tsl2591 import TSL2591
 from lib.vl53l0x import VL53L0X
 from lib.hx711 import HX711
@@ -42,11 +42,10 @@ API_W = "HG8GG8DF40LCGV99"
 # -----------------------------
 i2c = I2C(0, scl=Pin(18), sda=Pin(19))
 
-# Delay مهم لحساس LTR390 قبل التهيئة
-time.sleep_ms(1200)
+# حذف حساس LTR390 كاملًا
+# time.sleep_ms(1200)  # لم يعد ضروريًا
 
 sht = SHT30(i2c)
-ltr = LTR390(i2c)
 tsl = TSL2591(i2c)
 tof = VL53L0X(i2c)
 
@@ -58,7 +57,7 @@ wind_pin = Pin(13, Pin.IN)
 
 
 # -----------------------------
-# File upload to ThingSpeak
+# Send to ThingSpeak
 # -----------------------------
 def send_ts(api_key, vals):
     try:
@@ -77,20 +76,17 @@ def send_ts(api_key, vals):
 # -----------------------------
 def read_A():
     t, h = sht.measure()
-    uv = ltr.uva()
     lux = tsl.lux()
+    dist = tof.read()
     return (t, h, lux)
-
 
 def read_B():
     return read_A()
 
-
 def read_C():
     t, h = sht.measure()
-    d = tof.read()
-    return (t, h, d)
-
+    dist = tof.read()
+    return (t, h, dist)
 
 def read_W():
     return (wind_pin.value(), 0, 0)
