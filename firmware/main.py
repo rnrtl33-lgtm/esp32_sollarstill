@@ -7,8 +7,8 @@ from machine import I2C, SoftI2C, Pin
 # WiFi
 # ===============================
 
-SSID = "HUAWEI-1006VE_Wi-Fi5"
-PASS = "FPdGG9N7"
+SSID = "Abdullah's phone"
+PASS = "42012999"
 
 def wifi():
     wlan = network.WLAN(network.STA_IF)
