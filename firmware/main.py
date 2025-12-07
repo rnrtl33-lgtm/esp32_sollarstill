@@ -1,221 +1,228 @@
-import time
 import network
 import urequests
+import time
 from machine import I2C, SoftI2C, Pin
 
-# ===============================
-# WiFi
-# ===============================
+# ==========================
+#  WiFi CONFIG
+# ==========================
+WIFI_SSID = "Abdullah's phone"
+WIFI_PASS = "42012999"
 
-SSID = "Abdullah's phone"
-PASS = "42012999"
-
-def wifi():
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-    if not wlan.isconnected():
-        wlan.connect(SSID, PASS)
-        t = 20
-        while not wlan.isconnected() and t > 0:
-            time.sleep(1)
-            t -= 1
-    print("WiFi:", wlan.ifconfig())
-
-wifi()
-print("MAIN STARTED")
-
-# ===============================
-# SHT30
-# ===============================
-
-class SHT30:
-    def __init__(self, i2c, addr=0x44):
-        self.i2c = i2c
-        self.addr = addr
-
-    def read(self):
-        try:
-            self.i2c.writeto(self.addr, b'\x2C\x06')
-            time.sleep_ms(15)
-            d = self.i2c.readfrom(self.addr, 6)
-            t = -45 + 175 * ((d[0] << 8) + d[1]) / 65535
-            h = 100 * ((d[3] << 8) + d[4]) / 65535
-            return round(t,2), round(h,2)
-        except:
-            return 0,0
-
-# ===============================
-# TSL2591 (مختصر)
-# ===============================
-
-class TSL2591:
-    def __init__(self, i2c, addr=0x29):
-        self.i2c = i2c
-        self.addr = addr
-        try:
-            self.i2c.writeto_mem(self.addr, 0x00, b'\x01')
-        except:
-            pass
-
-    def read(self):
-        try:
-            ch0 = self.i2c.readfrom_mem(self.addr, 0x14, 2)
-            ch1 = self.i2c.readfrom_mem(self.addr, 0x16, 2)
-            return int.from_bytes(ch0,"little"), int.from_bytes(ch1,"little")
-        except:
-            return 0,0
-
-# ===============================
-# VL53L0X (مختصر)
-# ===============================
-
-class VL53:
-    def __init__(self, i2c, addr=0x29):
-        self.i2c = i2c
-        self.addr = addr
-
-    def read(self):
-        try:
-            self.i2c.writeto_mem(self.addr, 0x00, b'\x01')
-            time.sleep_ms(50)
-            r = self.i2c.readfrom_mem(self.addr, 0x14, 2)
-            return (r[0] << 8) | r[1]
-        except:
-            return 0
-
-# ===============================
-# I2C MAPS
-# ===============================
-
-# A1
-i2c_a1 = I2C(0, scl=Pin(18), sda=Pin(19))
-shtA_air  = SHT30(i2c_a1, 0x45)
-tslA      = TSL2591(i2c_a1)
-distA     = VL53(i2c_a1)
-
-# A2
-i2c_a2 = I2C(1, scl=Pin(5), sda=Pin(23))
-shtA_w2   = SHT30(i2c_a2, 0x44)
-
-# B1
-i2c_b1 = SoftI2C(scl=Pin(26), sda=Pin(25))
-shtB_air  = SHT30(i2c_b1, 0x45)
-tslB      = TSL2591(i2c_b1)
-distB     = VL53(i2c_b1)
-
-# B2
-i2c_b2 = SoftI2C(scl=Pin(32), sda=Pin(33))
-shtB_w2 = SHT30(i2c_b2, 0x44)
-
-# C1
-i2c_c1 = SoftI2C(scl=Pin(4), sda=Pin(2))
-shtC_air = SHT30(i2c_c1, 0x45)
-tslC     = TSL2591(i2c_c1)
-distC    = VL53(i2c_c1)
-
-# C2
-i2c_c2 = SoftI2C(scl=Pin(27), sda=Pin(14))
-shtC_w2 = SHT30(i2c_c2, 0x44)
-
-# ===============================
-# Wind Sensor (GPIO13)
-# ===============================
-
-wind_pin = Pin(13, Pin.IN, Pin.PULL_UP)
-wind_pulse = 0
-
-def irq_wind(p):
-    global wind_pulse
-    wind_pulse += 1
-
-wind_pin.irq(trigger=Pin.IRQ_FALLING, handler=irq_wind)
-
-def get_wind():
-    global wind_pulse
-    wind_pulse = 0
-    time.sleep(1)
-    return wind_pulse * 2.4  # km/h
-
-# ===============================
-# ThingSpeak API KEYS
-# ===============================
-
+# ==========================
+#  THINGSPEAK API KEYS
+# ==========================
 API_A = "EU6EE36IJ7WSVYP3"
 API_B = "E8CTAK8MCUWLVQJ2"
 API_C = "Y1FWSOX7Z6YZ8QMU"
 API_W = "HG8GG8DF40LCGV99"
 
+# ==========================
+#  I2C BUS DEFINITIONS
+# ==========================
+# A: Bus0
+i2c_A1 = I2C(0, scl=Pin(18), sda=Pin(19))
+i2c_A2 = I2C(1, scl=Pin(5),  sda=Pin(23))
 
-# ===============================
-# Send Function
-# ===============================
+# B: Bus1
+i2c_B1 = SoftI2C(scl=Pin(26), sda=Pin(25))
+i2c_B2 = SoftI2C(scl=Pin(32), sda=Pin(33))
 
-def send_ts(api, **f):
+# C: Bus2
+i2c_C1 = SoftI2C(scl=Pin(14), sda=Pin(27))
+i2c_C2 = SoftI2C(scl=Pin(4),  sda=Pin(15))
+
+# ==========================
+#  WIND SENSOR
+# ==========================
+wind_pin = Pin(13, Pin.IN)
+wind_count = 0
+
+def wind_irq(p):
+    global wind_count
+    wind_count += 1
+
+wind_pin.irq(trigger=Pin.IRQ_RISING, handler=wind_irq)
+
+def read_wind_speed():
+    """ يحسب نبضات الرياح خلال 3 ثواني """
+    global wind_count
+    wind_count = 0
+    time.sleep(3)
+    speed = wind_count * 0.2  # تحويل تقريبي
+    return speed
+
+# ==========================
+#  SENSOR SAFE READ
+# ==========================
+def safe_read(func, fallback=0):
+    try:
+        return func()
+    except:
+        return fallback
+
+# ==========================
+#  IMPORT SENSOR LIBRARIES
+# ==========================
+from lib.sht30 import SHT30
+from lib.vl53 import VL53L0X
+from lib.ltr390 import LTR390
+from lib.tsl2591 import TSL2591
+from lib.hx711 import HX711
+
+# ==========================
+#  INIT SENSORS
+# ==========================
+def init_all():
+
+    # MODEL A
+    A = {}
+    A["amb"]  = SHT30(i2c_A1)
+    A["uv"]   = LTR390(i2c_A1)
+    A["dist"] = VL53L0X(i2c_A1)
+    A["air"]  = SHT30(i2c_A2)
+    A["w2"]   = SHT30(i2c_A2)
+    A["lux"]  = TSL2591(i2c_A1)
+    A["hx"]   = HX711(d_out=21, pd_sck=22)
+
+    # MODEL B
+    B = {}
+    B["uv"]   = LTR390(i2c_B1)
+    B["dist"] = VL53L0X(i2c_B1)
+    B["air"]  = SHT30(i2c_B2)
+    B["w2"]   = SHT30(i2c_B2)
+    B["lux"]  = TSL2591(i2c_B1)
+    B["hx"]   = HX711(d_out=17, pd_sck=16)
+
+    # MODEL C
+    C = {}
+    C["uv"]   = LTR390(i2c_C1)
+    C["dist"] = VL53L0X(i2c_C1)
+    C["air"]  = SHT30(i2c_C2)
+    C["w2"]   = SHT30(i2c_C2)
+    C["lux"]  = TSL2591(i2c_C1)
+    C["hx"]   = HX711(d_out=2, pd_sck=0)
+
+    return A, B, C
+
+A, B, C = init_all()
+
+# ==========================
+#  WIFI CONNECT
+# ==========================
+def wifi():
+    sta = network.WLAN(network.STA_IF)
+    sta.active(True)
+    sta.connect(WIFI_SSID, WIFI_PASS)
+
+    while not sta.isconnected():
+        print("Connecting WiFi...")
+        time.sleep(1)
+
+    print("WiFi:", sta.ifconfig())
+    return True
+
+wifi()
+
+# ==========================
+#  SEND TO THINGSPEAK
+# ==========================
+def send_ts(api, **fields):
     url = "https://api.thingspeak.com/update?api_key=" + api
-    for k,v in f.items():
-        url += f"&field{k}={v}"
+    for k, v in fields.items():
+        url += f"&{k}={v}"
     try:
         r = urequests.get(url)
-        print("TS:", r.text)
         r.close()
     except:
-        print("TS ERROR")
+        pass
 
-# ===============================
-# MAIN LOOP — SAFE CYCLING
-# ===============================
+# ==========================
+#  MAIN LOOP
+# ==========================
+print("MAIN STARTED")
 
 while True:
 
-    # -------- MODEL A --------
-    Ta_air, Ha_air = shtA_air.read()
-    Ta_w2,  Ha_w2  = shtA_w2.read()
-    luxA, irA      = tslA.read()
-    dist_A         = distA.read()
+    print("\nReading sensors...")
+
+    # ------------------------------
+    # MODEL A
+    # ------------------------------
+    A_amb = safe_read(lambda: A["amb"].read())
+    A_uv  = safe_read(lambda: A["uv"].read_uv())
+    A_dis = safe_read(lambda: A["dist"].read())
+    A_air = safe_read(lambda: A["air"].read())
+    A_w2  = safe_read(lambda: A["w2"].read())
+    A_lux = safe_read(lambda: A["lux"].lux())
+    A_ir  = safe_read(lambda: A["lux"].ir())
+    A_hx  = safe_read(lambda: A["hx"].read())
 
     send_ts(API_A,
-        field1=dist_A,
-        field2=Ta_air,
-        field3=Ta_w2,
-        field4=luxA,
-        field5=irA
+        field1=A_amb[0] if A_amb else 0,
+        field2=A_uv,
+        field3=A_dis,
+        field4=A_air[0] if A_air else 0,
+        field5=A_w2[0] if A_w2 else 0,
+        field6=A_lux,
+        field7=A_ir,
+        field8=A_hx
     )
-    time.sleep(10)
 
-    # -------- MODEL B --------
-    Tb_air, Hb_air = shtB_air.read()
-    Tb_w2,  Hb_w2  = shtB_w2.read()
-    luxB, irB      = tslB.read()
-    dist_B         = distB.read()
+    # ------------------------------
+    # MODEL B
+    # ------------------------------
+    B_uv  = safe_read(lambda: B["uv"].read_uv())
+    B_dis = safe_read(lambda: B["dist"].read())
+    B_air = safe_read(lambda: B["air"].read())
+    B_w2  = safe_read(lambda: B["w2"].read())
+    B_lux = safe_read(lambda: B["lux"].lux())
+    B_ir  = safe_read(lambda: B["lux"].ir())
+    B_hx  = safe_read(lambda: B["hx"].read())
 
     send_ts(API_B,
-        field1=dist_B,
-        field2=Tb_air,
-        field3=Tb_w2,
-        field4=luxB,
-        field5=irB
+        field1=B_uv,
+        field2=B_dis,
+        field3=B_air[0] if B_air else 0,
+        field4=B_w2[0] if B_w2 else 0,
+        field5=B_hx,
+        field6=B_lux,
+        field7=B_ir
     )
-    time.sleep(10)
 
-    # -------- MODEL C --------
-    Tc_air, Hc_air = shtC_air.read()
-    Tc_w2,  Hc_w2  = shtC_w2.read()
-    luxC, irC      = tslC.read()
-    dist_C         = distC.read()
+    # ------------------------------
+    # MODEL C
+    # ------------------------------
+    C_uv  = safe_read(lambda: C["uv"].read_uv())
+    C_dis = safe_read(lambda: C["dist"].read())
+    C_air = safe_read(lambda: C["air"].read())
+    C_w2  = safe_read(lambda: C["w2"].read())
+    C_lux = safe_read(lambda: C["lux"].lux())
+    C_ir  = safe_read(lambda: C["lux"].ir())
+    C_hx  = safe_read(lambda: C["hx"].read())
 
     send_ts(API_C,
-        field1=dist_C,
-        field2=Tc_air,
-        field3=Tc_w2,
-        field4=luxC,
-        field5=irC
+        field1=C_uv,
+        field2=C_dis,
+        field3=C_air[0] if C_air else 0,
+        field4=C_w2[0] if C_w2 else 0,
+        field5=C_lux,
+        field6=C_ir,
+        field7=C_hx
     )
-    time.sleep(10)
 
-    # -------- WIND --------
-    w = get_wind()
-    send_ts(API_W, field1=w)
-    time.sleep(10)
+    # ------------------------------
+    # WIND
+    # ------------------------------
+    w = read_wind_speed()
+
+    send_ts(API_W,
+        field1=w
+    )
+
+    print("TS:", time.ticks_ms()//1000)
+    time.sleep(15)   # إرسال كل 15 ثانية
+
 
 
 
