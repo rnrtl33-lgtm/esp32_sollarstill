@@ -4,15 +4,15 @@ import urequests
 from machine import Pin, I2C
 from lib.sht30 import SHT30
 from lib.tsl2591 import TSL2591
-from lib.vl53 import VL53L0X
+from lib.vl53l0x import VL53L0X
 from lib.ltr390 import LTR390
 
 
 # -----------------------------
 #   WIFI
 # -----------------------------
-SSID = "abdullah"
-PW   = "123456789"
+SSID = "Abdullah"
+PW   = "42012999"
 
 def wifi_connect():
     wlan = network.WLAN(network.STA_IF)
