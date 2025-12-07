@@ -1,108 +1,116 @@
 import time
 import network
 import urequests
-from machine import SoftI2C, Pin
-
-# -----------------------------
-# WIFI
-# -----------------------------
-SSID = "Abdullah's phone"
-PASS = "42012999"
-
-def wifi():
-    sta = network.WLAN(network.STA_IF)
-    sta.active(True)
-    if not sta.isconnected():
-        sta.connect(SSID, PASS)
-        for _ in range(20):
-            if sta.isconnected(): break
-            time.sleep(1)
-    print("WiFi:", sta.ifconfig())
-
-wifi()
-
-# -----------------------------
-# API KEY MODEL B ONLY
-# -----------------------------
-API_B = "E8CTAK8MCUWLVQJ2"
-
-# -----------------------------
-# IMPORT LIBRARIES
-# -----------------------------
+from machine import Pin, I2C
 from lib.sht30 import SHT30
-from lib.ltr390 import LTR390
-from lib.vl53l0x import VL53L0X
 from lib.tsl2591 import TSL2591
+from lib.vl53 import VL53L0X
+from lib.ltr390 import LTR390
+
 
 # -----------------------------
-# SAFE FUNCTION
+#   WIFI
 # -----------------------------
-def safe(fn, fallback=0):
+SSID = "abdullah"
+PW   = "123456789"
+
+def wifi_connect():
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+    if not wlan.isconnected():
+        wlan.connect(SSID, PW)
+        while not wlan.isconnected():
+            time.sleep(0.3)
+    print("WiFi:", wlan.ifconfig())
+
+
+# -----------------------------
+#   THINGSPEAK KEYS
+# -----------------------------
+API_A = "EU6EE36IJ7WSVYP3"
+API_B = "E8CTAK8MCUWLVQJ2"
+API_C = "Y1FWSOX7Z6YZ8QMU"
+API_D = "HG8GG8DF40LCGV99"
+
+CHANNEL = {
+    'A': API_A,
+    'B': API_B,
+    'C': API_C,
+    'D': API_D
+}
+
+
+# -----------------------------
+#   I2C
+# -----------------------------
+i2c = I2C(0, scl=Pin(18), sda=Pin(19))
+
+
+# -----------------------------
+#   SAFE SENSOR READERS
+# -----------------------------
+def read_sht30():
     try:
-        return fn()
+        s = SHT30(i2c)
+        t, h = s.measure()
+        return t, h
     except:
-        return fallback
+        return 0, 0
+
+
+def read_ltr390():
+    try:
+        s = LTR390(i2c)
+        return s.uvi()
+    except:
+        return 0
+
+
+def read_tsl2591():
+    try:
+        s = TSL2591(i2c)
+        lux = s.get_lux()
+        ir = s.get_ir()
+        return lux, ir
+    except:
+        return 0, 0
+
+
+def read_vl53():
+    try:
+        s = VL53L0X(i2c)
+        d = s.read()
+        return d
+    except:
+        return 0
+
 
 # -----------------------------
-# I2C BUSES
+#   MODEL DETECTION
 # -----------------------------
-# B1 bus
-i2c_b1 = SoftI2C(scl=Pin(26), sda=Pin(25))
+def detect_model():
+    scan = [hex(x) for x in i2c.scan()]
+    # VL53 (0x29), SHT30 (0x44/0x45), TSL (0x29 if same bus), LTR (0x53)
+    # نستخدم نفس المنطق القديم
+    if '0x53' in scan and '0x29' in scan and '0x44' in scan:
+        return 'A'
+    if '0x29' in scan and '0x44' in scan:
+        return 'B'
+    if '0x29' in scan and '0x45' in scan:
+        return 'C'
+    return 'D'
 
-# B2 bus
-i2c_b2 = SoftI2C(scl=Pin(14), sda=Pin(27))
-
-# -----------------------------
-# INIT SENSORS WITH DELAYS
-# -----------------------------
-print("Initializing sensors...")
-
-# ---- LTR390 ----
-try:
-    ltrB = LTR390(i2c_b1)
-    time.sleep_ms(150)
-except:
-    ltrB = None
-    print("LTR390_B FAIL")
-
-# ---- VL53L0X ----
-try:
-    vl53B = VL53L0X(i2c_b1)
-    time.sleep_ms(200)
-except:
-    vl53B = None
-    print("VL53_B FAIL")
-
-# ---- SHT30 sensors ----
-try:
-    shtAirB = SHT30(i2c_b2, addr=0x45)
-except:
-    shtAirB = None
-    print("SHT Air FAIL")
-
-try:
-    shtW2B = SHT30(i2c_b2, addr=0x44)
-except:
-    shtW2B = None
-    print("SHT Water FAIL")
-
-# ---- TSL2591 ----
-try:
-    tslB = TSL2591(i2c_b2)
-    time.sleep_ms(150)
-except:
-    tslB = None
-    print("TSL FAIL")
-
-print("MAIN STARTED — MODEL B ONLY")
 
 # -----------------------------
-# SEND TO THINGSPEAK
+#   SEND TO THINGSPEAK
 # -----------------------------
-def send_ts(api, **fields):
+def send(model, fields):
+    api = CHANNEL[model]
     url = "https://api.thingspeak.com/update?api_key=" + api
-    for k, v in fields.items():
-        url += f"&{k}={v}"
+
+    for i, v in enumerate(fields, start=1):
+        url += f"&field{i}={v}"
+
     try:
         r = urequests.get(url)
         print("TS:", r.text)
@@ -110,50 +118,75 @@ def send_ts(api, **fields):
     except:
         print("TS ERROR")
 
+
 # -----------------------------
-# MAIN LOOP
+#   MAIN LOOP
 # -----------------------------
+wifi_connect()
+model = detect_model()
+print("Detected Model:", model)
+
+print("MAIN STARTED")
+
 while True:
 
-    # ---- UV ----
-    uv = 0
-    if ltrB:
-        uv = safe(lambda: ltrB.read_uv())
+    # -----------------------------
+    # MODEL A
+    # -----------------------------
+    if model == 'A':
+        t1, h1 = read_sht30()          # Field 1
+        uv    = read_ltr390()          # Field 2
+        dis   = read_vl53()            # Field 3
+        t2, h2 = read_sht30()          # Field 4 & 5 (Air + W2)
+        lux, ir = read_tsl2591()       # Field 6 & 7
 
-    # ---- Distance ----
-    dist = 0
-    if vl53B:
-        dist = safe(lambda: vl53B.read())
+        fields = [t1, uv, dis, t2, h2, lux, ir]
+        send('A', fields)
+        print("A SENT →", fields)
+        time.sleep(15)
 
-    # ---- Air temp/humidity ----
-    t_air = h_air = 0
-    if shtAirB:
-        t_air, h_air = safe(lambda: shtAirB.read(), (0,0))
+    # -----------------------------
+    # MODEL B
+    # -----------------------------
+    elif model == 'B':
+        uv    = read_ltr390()
+        dis   = read_vl53()
+        t, h  = read_sht30()
+        t2, h2 = read_sht30()
+        lux, ir = read_tsl2591()
 
-    # ---- Water temp ----
-    t_w2 = h_w2 = 0
-    if shtW2B:
-        t_w2, h_w2 = safe(lambda: shtW2B.read(), (0,0))
+        fields = [uv, dis, t, h, t2, h2, lux, ir]
+        send('B', fields)
+        print("B SENT →", fields)
+        time.sleep(15)
 
-    # ---- Light ----
-    lux = ir = 0
-    if tslB:
-        lux = safe(lambda: tslB.lux())
-        ir  = safe(lambda: tslB.ir())
+    # -----------------------------
+    # MODEL C
+    # -----------------------------
+    elif model == 'C':
+        uv    = read_ltr390()
+        dis   = read_vl53()
+        t, h  = read_sht30()
+        t2, h2 = read_sht30()
+        lux, ir = read_tsl2591()
 
-    # ---- SEND ----
-    send_ts(API_B,
-        field1 = uv,
-        field2 = dist,
-        field3 = t_air,
-        field4 = t_w2,
-        field5 = 0,
-        field6 = lux,
-        field7 = ir
-    )
+        fields = [uv, dis, t, h, t2, h2, lux]
+        send('C', fields)
+        print("C SENT →", fields)
+        time.sleep(15)
 
-    print("B SENT — 15 seconds...\n")
-    time.sleep(15)
+    # -----------------------------
+    # MODEL D (WIND)
+    # -----------------------------
+    elif model == 'D':
+        wind_pin = Pin(13, Pin.IN)
+        wind_speed = wind_pin.value()
+
+        fields = [wind_speed]
+        send('D', fields)
+        print("D SENT →", fields)
+        time.sleep(15)
+
 
 
 
