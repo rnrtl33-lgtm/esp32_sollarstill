@@ -7,7 +7,7 @@ from lib.vl53l0x import VL53L0X
 print("MAIN STARTED")
 
 # -----------------------------
-# WiFi (للتأكيد أن الاتصال مستمر)
+# WiFi
 # -----------------------------
 SSID = "HUAWEI-1006VE_Wi-Fi5"
 PASS = "FPdGG9N7"
@@ -26,7 +26,7 @@ def ensure_wifi():
 
 
 # -----------------------------
-# ThingSpeak API Keys
+# ThingSpeak Keys
 # -----------------------------
 API_A = "EU6EE36IJ7WSVYP3"
 API_B = "E8CTAK8MCUWLVQJ2"
@@ -34,9 +34,6 @@ API_C = "Y1FWSOX7Z6YZ8QMU"
 API_W = "HG8GG8DF40LCGV99"
 
 
-# -----------------------------
-# Function: Send to ThingSpeak
-# -----------------------------
 def ts_send(api, f1, f2, f3, f4):
     try:
         url = (
@@ -51,18 +48,20 @@ def ts_send(api, f1, f2, f3, f4):
 
 
 # -----------------------------
-# I2C Buses (6 Buses)
+# I2C Buses (6 buses)
 # -----------------------------
 print("Init I2C buses...")
 
+# استخدمنا 0 و 1 للهاردوير
 i2c_A1 = I2C(0, scl=Pin(18), sda=Pin(19))
 i2c_A2 = I2C(1, scl=Pin(5),  sda=Pin(23))
 
-i2c_B1 = I2C(2, scl=Pin(26), sda=Pin(25))
-i2c_B2 = I2C(3, scl=Pin(14), sda=Pin(27))
+# البقية Software I2C باستخدام -1
+i2c_B1 = I2C(-1, scl=Pin(26), sda=Pin(25))
+i2c_B2 = I2C(-1, scl=Pin(14), sda=Pin(27))
 
-i2c_C1 = I2C(4, scl=Pin(0),  sda=Pin(32))
-i2c_C2 = I2C(5, scl=Pin(2),  sda=Pin(15))
+i2c_C1 = I2C(-1, scl=Pin(0),  sda=Pin(32))
+i2c_C2 = I2C(-1, scl=Pin(2),  sda=Pin(15))
 
 
 # -----------------------------
@@ -158,13 +157,11 @@ print("System Ready. Entering loop...")
 
 while True:
     try:
-        # Reads
         A = read_model_A()
         B = read_model_B()
         C = read_model_C()
         W = read_wind()
 
-        # Sends
         ts_send(API_A, A[0], A[1], A[2], A[3])
         ts_send(API_B, B[0], B[1], B[2], B[3])
         ts_send(API_C, C[0], C[1], C[2], C[3])
