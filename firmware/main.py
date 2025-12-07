@@ -1,158 +1,243 @@
-import time, network, urequests
+
+import time
+import network
+import urequests
 from machine import I2C, SoftI2C, Pin
-from lib.sht30 import SHT30
-from lib.ltr390 import LTR390
-from lib.tsl2591 import TSL2591
-from lib.vl53l0x import VL53L0X
 
-# -----------------------------
-# WiFi
-# -----------------------------
-SSID = "HUAWEI-1006VE_Wi-Fi5"
-PASS = "FPdGG9N7"
+# ===============================
+#  WiFi
+# ===============================
 
-def wifi():
+WIFI_SSID = "Abdullah's phone"
+WIFI_PASS = "42012999"
+
+def wifi_connect():
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     if not wlan.isconnected():
-        wlan.connect(SSID, PASS)
-        while not wlan.isconnected():
+        wlan.connect(WIFI_SSID, WIFI_PASS)
+        t = 20
+        while not wlan.isconnected() and t > 0:
             time.sleep(1)
-    print("WiFi:", wlan.ifconfig())
+            t -= 1
+    print("WiFi:", wlan.ifconfig() if wlan.isconnected() else "FAILED")
 
-wifi()
+wifi_connect()
 
 print("MAIN STARTED")
 
+# ===============================
+# Sensors in Model A
+# ===============================
 
-# =====================================================
-#                     I2C BUSES
-# =====================================================
+i2c_a1 = I2C(0, scl=Pin(18), sda=Pin(19))        # A1
+i2c_a2 = I2C(1, scl=Pin(5),  sda=Pin(23))        # A2
 
-# ----- A1 -----
-i2c_A1 = I2C(0, scl=Pin(18), sda=Pin(19))   # Hardware I2C
+# SHT30 library
+class SHT30:
+    def __init__(self, i2c, addr=0x44):
+        self.i2c = i2c
+        self.addr = addr
 
-# ----- A2 -----
-i2c_A2 = I2C(1, scl=Pin(5), sda=Pin(23))    # Hardware I2C
+    def read(self):
+        self.i2c.writeto(self.addr, b'\x2C\x06')
+        time.sleep_ms(15)
+        data = self.i2c.readfrom(self.addr, 6)
+        temp = -45 + 175 * ((data[0] << 8) + data[1]) / 65535
+        hum = 100 * ((data[3] << 8) + data[4]) / 65535
+        return round(temp, 2), round(hum, 2)
 
-# ----- B1 -----
-i2c_B1 = SoftI2C(scl=Pin(26), sda=Pin(25))  # Soft I2C
+# LTR390 (UV)
+class LTR390:
+    def __init__(self, i2c, addr=0x53):
+        self.i2c = i2c
+        self.addr = addr
+        self.i2c.writeto_mem(self.addr, 0x00, b'\x01')
 
-# ----- B2 -----
-i2c_B2 = SoftI2C(scl=Pin(14), sda=Pin(27))  # Soft I2C
+    def read_uv(self):
+        try:
+            data = self.i2c.readfrom_mem(self.addr, 0x07, 3)
+            return int.from_bytes(data, "little")
+        except:
+            return 0
 
+# TSL2591
+class TSL2591:
+    def __init__(self, i2c, addr=0x29):
+        self.i2c = i2c
+        self.addr = addr
+        try:
+            self.i2c.writeto_mem(self.addr, 0x00, b'\x01')
+        except:
+            pass
 
-# =====================================================
-#                     SENSORS A
-# =====================================================
+    def read(self):
+        try:
+            ch0 = self.i2c.readfrom_mem(self.addr, 0x14, 2)
+            ch1 = self.i2c.readfrom_mem(self.addr, 0x16, 2)
+            return int.from_bytes(ch0, "little"), int.from_bytes(ch1, "little")
+        except:
+            return (0, 0)
 
-print("Init sensors A...")
+# VL53L0X (simplified)
+class VL53L0X:
+    def __init__(self, i2c, addr=0x29):
+        self.i2c = i2c
+        self.addr = addr
 
-# A1
-sht_ambient = SHT30(i2c_A1, addr=0x45)
-ltr_a = LTR390(i2c_A1, addr=0x53)
-vl_a = VL53L0X(i2c_A1)
+    def read(self):
+        try:
+            self.i2c.writeto_mem(self.addr, 0x00, b'\x01')
+            time.sleep_ms(50)
+            r = self.i2c.readfrom_mem(self.addr, 0x14, 2)
+            return (r[0] << 8) | r[1]
+        except:
+            return 0
 
-# A2
-sht_air = SHT30(i2c_A2, addr=0x45)
-sht_water = SHT30(i2c_A2, addr=0x44)
-tsl_a = TSL2591(i2c_A2)
+# ===============================
+# Create sensor objects
+# ===============================
 
+sht_air_A = SHT30(i2c_a1)
+sht_w2_A  = SHT30(i2c_a2)
+uv_A      = LTR390(i2c_a1)
+dist_A    = VL53L0X(i2c_a1)
+tsl_A     = TSL2591(i2c_a1)
 
-# =====================================================
-#                     SENSORS B
-# =====================================================
+# ===============================
+# Sensors in Model B
+# ===============================
 
-print("Init sensors B...")
+i2c_b1 = SoftI2C(scl=Pin(26), sda=Pin(25))
+i2c_b2 = SoftI2C(scl=Pin(32), sda=Pin(33))
 
-# B1
-ltr_b = LTR390(i2c_B1, addr=0x53)
-vl_b = VL53L0X(i2c_B1)
+sht_air_B = SHT30(i2c_b1)
+sht_w2_B  = SHT30(i2c_b2)
+uv_B      = LTR390(i2c_b1)
+dist_B    = VL53L0X(i2c_b1)
+tsl_B     = TSL2591(i2c_b1)
 
-# B2
-sht_air_b = SHT30(i2c_B2, addr=0x45)
-sht_water_b = SHT30(i2c_B2, addr=0x44)
-tsl_b = TSL2591(i2c_B2)
+# ===============================
+# Sensors in Model C
+# ===============================
 
+i2c_c1 = SoftI2C(scl=Pin(4), sda=Pin(2))
+i2c_c2 = SoftI2C(scl=Pin(27), sda=Pin(14))
 
-# =====================================================
-#                  THINGSPEAK API
-# =====================================================
+sht_air_C = SHT30(i2c_c1)
+sht_w2_C  = SHT30(i2c_c2)
+uv_C      = LTR390(i2c_c1)
+dist_C    = VL53L0X(i2c_c1)
+tsl_C     = TSL2591(i2c_c1)
 
-API_KEY = "EU6EE36IJ7WSVYP3"   # قناة A + B الآن في نفس القناة
+# ===============================
+# Wind Speed Sensor (GPIO13)
+# ===============================
 
-def send_data(params):
-    url = "https://api.thingspeak.com/update?api_key=" + API_KEY
-    for field, val in params.items():
-        url += f"&field{field}={val}"
+wind_pin = Pin(13, Pin.IN, Pin.PULL_UP)
+wind_pulses = 0
+
+def wind_irq(pin):
+    global wind_pulses
+    wind_pulses += 1
+
+wind_pin.irq(trigger=Pin.IRQ_FALLING, handler=wind_irq)
+
+def get_wind_speed():
+    global wind_pulses
+    wind_pulses = 0
+    time.sleep(1)
+    pps = wind_pulses
+    return pps * 2.4   # km/h
+
+# ===============================
+# ThingSpeak APIs
+# ===============================
+
+API_A = "EU6EE36IJ7WSVYP3".strip()
+API_B = "E8CTAK8MCUWLVQJ2".strip()
+API_C = "Y1FWSOX7Z6YZ8QMU".strip()
+API_W = "HG8GG8DF40LCGV99".strip()
+
+def send_ts(api, **fields):
+    url = "https://api.thingspeak.com/update?api_key=" + api
+    for k, v in fields.items():
+        url += f"&field{k}={v}"
     try:
         r = urequests.get(url)
         print("TS:", r.text)
         r.close()
     except Exception as e:
-        print("ThingSpeak ERR:", e)
+        print("TS ERROR:", e)
 
-
-# =====================================================
-#                       LOOP
-# =====================================================
+# ===============================
+# Main Loop
+# ===============================
 
 while True:
-    try:
-        # ----------- A1 -----------
-        t_amb, h_amb = sht_ambient.measure()
-        uv_a = ltr_a.read_uv()
-        lux_a = ltr_a.read_lux()
-        dist_a = vl_a.read()
+    print("\nReading sensors...")
 
-        # ----------- A2 -----------
-        t_air, h_air = sht_air.measure()
-        t_water, h_water = sht_water.measure()
-        vis_a, ir_a = tsl_a.read()
+    # ---------- MODEL A ----------
+    t_air_A, h_air_A = sht_air_A.read()
+    t_w2_A,  h_w2_A  = sht_w2_A.read()
+    uvA = uv_A.read_uv()
+    distA = dist_A.read()
+    tslA_ch0, tslA_ch1 = tsl_A.read()
 
-        # ----------- B1 -----------
-        uv_b = ltr_b.read_uv()
-        lux_b = ltr_b.read_lux()
-        dist_b = vl_b.read()
+    send_ts(API_A,
+        **{
+            1: uvA,
+            2: distA,
+            3: t_air_A,
+            4: t_w2_A,
+            5: tslA_ch0,
+            6: tslA_ch1
+        }
+    )
 
-        # ----------- B2 -----------
-        t_air_b, h_air_b = sht_air_b.measure()
-        t_water_b, h_water_b = sht_water_b.measure()
-        vis_b, ir_b = tsl_b.read()
+    # ---------- MODEL B ----------
+    t_air_B, h_air_B = sht_air_B.read()
+    t_w2_B,  h_w2_B  = sht_w2_B.read()
+    uvB = uv_B.read_uv()
+    distB = dist_B.read()
+    tslB_ch0, tslB_ch1 = tsl_B.read()
 
-        # Debug print
-        print("A1 Ambient:", t_amb, h_amb)
-        print("A1 LTR:", uv_a, lux_a)
-        print("A1 VL:", dist_a)
-        print("A2 Air:", t_air, h_air)
-        print("A2 Water:", t_water, h_water)
-        print("A2 TSL:", vis_a, ir_a)
+    send_ts(API_B,
+        **{
+            1: uvB,
+            2: distB,
+            3: t_air_B,
+            4: t_w2_B,
+            5: tslB_ch0,
+            6: tslB_ch1
+        }
+    )
 
-        print("B1 LTR:", uv_b, lux_b)
-        print("B1 VL:", dist_b)
-        print("B2 Air:", t_air_b, h_air_b)
-        print("B2 Water:", t_water_b, h_water_b)
-        print("B2 TSL:", vis_b, ir_b)
+    # ---------- MODEL C ----------
+    t_air_C, h_air_C = sht_air_C.read()
+    t_w2_C,  h_w2_C  = sht_w2_C.read()
+    uvC = uv_C.read_uv()
+    distC = dist_C.read()
+    tslC_ch0, tslC_ch1 = tsl_C.read()
 
-        # Sending data
-        send_data({
-            1: t_amb,
-            2: t_air,
-            3: t_water,
-            4: uv_a,
-            5: lux_a,
-            6: dist_a,
-            7: t_air_b,
-            8: t_water_b,
-            9: uv_b,
-            10: lux_b,
-            11: dist_b
-        })
+    send_ts(API_C,
+        **{
+            1: uvC,
+            2: distC,
+            3: t_air_C,
+            4: t_w2_C,
+            5: tslC_ch0,
+            6: tslC_ch1
+        }
+    )
 
-    except Exception as e:
-        print("ERR:", e)
+    # ---------- WIND ----------
+    wind = get_wind_speed()
+    send_ts(API_W, **{1: wind})
 
-    time.sleep(20)
+    print("WAITING 30s...")
+    time.sleep(30)
+
 
 
 
