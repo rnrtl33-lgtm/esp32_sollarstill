@@ -1,36 +1,32 @@
-import time
-import network
-import urequests
-
+import time, network, urequests
+from machine import I2C, Pin
 from lib.sht30 import SHT30
 from lib.tsl2591 import TSL2591
 from lib.vl53l0x import VL53L0X
-from lib.hx711 import HX711
 
-from machine import I2C, Pin
-
-print("MAIN.PY STARTED")
-
+print("MAIN STARTED")
 
 # -----------------------------
-# WiFi
+# WiFi (للتأكيد أن الاتصال مستمر)
 # -----------------------------
-WIFI_SSID = "HUAWEI-1006VE_Wi-Fi5"
-WIFI_PASS = "FPdGG9N7"
+SSID = "HUAWEI-1006VE_Wi-Fi5"
+PASS = "FPdGG9N7"
 
-def connect_wifi():
-    print("Connecting WiFi...")
+def ensure_wifi():
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
-    wlan.connect(WIFI_SSID, WIFI_PASS)
-    while not wlan.isconnected():
-        time.sleep(0.5)
-    print("WiFi OK:", wlan.ifconfig())
+    if not wlan.isconnected():
+        wlan.connect(SSID, PASS)
+        for _ in range(20):
+            if wlan.isconnected():
+                break
+            time.sleep(1)
+    print("WiFi:", wlan.ifconfig())
     return wlan
 
 
 # -----------------------------
-# ThingSpeak API KEYS
+# ThingSpeak API Keys
 # -----------------------------
 API_A = "EU6EE36IJ7WSVYP3"
 API_B = "E8CTAK8MCUWLVQJ2"
@@ -39,92 +35,144 @@ API_W = "HG8GG8DF40LCGV99"
 
 
 # -----------------------------
-# Sensors Init (I2C)
+# Function: Send to ThingSpeak
 # -----------------------------
-print("Init I2C")
-i2c = I2C(0, scl=Pin(18), sda=Pin(19))
-
-print("Init SHT30 + TSL2591 + VL53L0X")
-sht = SHT30(i2c)
-tsl = TSL2591(i2c)
-tof = VL53L0X(i2c)
-
-print("Init HX711")
-hx = HX711(d_out=12, pd_sck=14)
-hx.tare()
-
-print("Init Wind Pin")
-wind_pin = Pin(13, Pin.IN)
-
-
-# -----------------------------
-# Send to ThingSpeak
-# -----------------------------
-def send_ts(api_key, vals):
-    print("Sending TS:", api_key, vals)
+def ts_send(api, f1, f2, f3, f4):
     try:
         url = (
-            "https://api.thingspeak.com/update?api_key={}&field1={}&field2={}&field3={}"
-        ).format(api_key, vals[0], vals[1], vals[2])
+            "https://api.thingspeak.com/update?"
+            "api_key={}&field1={}&field2={}&field3={}&field4={}"
+        ).format(api, f1, f2, f3, f4)
         r = urequests.get(url)
-        print("TS Response:", r.text)
+        print("TS:", api, "->", r.text)
         r.close()
     except Exception as e:
-        print("TS ERROR:", e)
+        print("TS ERROR:", api, e)
+
+
+# -----------------------------
+# I2C Buses (6 Buses)
+# -----------------------------
+print("Init I2C buses...")
+
+i2c_A1 = I2C(0, scl=Pin(18), sda=Pin(19))
+i2c_A2 = I2C(1, scl=Pin(5),  sda=Pin(23))
+
+i2c_B1 = I2C(2, scl=Pin(26), sda=Pin(25))
+i2c_B2 = I2C(3, scl=Pin(14), sda=Pin(27))
+
+i2c_C1 = I2C(4, scl=Pin(0),  sda=Pin(32))
+i2c_C2 = I2C(5, scl=Pin(2),  sda=Pin(15))
+
+
+# -----------------------------
+# XSHUT pins for VL53
+# -----------------------------
+XSHUT_A = Pin(17, Pin.OUT)
+XSHUT_B = Pin(22, Pin.OUT)
+XSHUT_C = Pin(4,  Pin.OUT)
+
+def enable_vl53(pin):
+    pin.value(1)
+    time.sleep_ms(5)
+
+
+# -----------------------------
+# Init Sensors
+# -----------------------------
+print("Init sensors...")
+
+# نموذج A
+enable_vl53(XSHUT_A)
+vl53_A = VL53L0X(i2c_A1)
+shtA1   = SHT30(i2c_A1)
+
+shtA2_air = SHT30(i2c_A2, addr=0x45)
+shtA2_w2  = SHT30(i2c_A2, addr=0x44)
+tslA      = TSL2591(i2c_A2)
+
+# نموذج B
+enable_vl53(XSHUT_B)
+vl53_B = VL53L0X(i2c_B1)
+
+shtB_air = SHT30(i2c_B2, addr=0x45)
+shtB_w2  = SHT30(i2c_B2, addr=0x44)
+tslB     = TSL2591(i2c_B2)
+
+# نموذج C
+enable_vl53(XSHUT_C)
+vl53_C = VL53L0X(i2c_C1)
+
+shtC_air = SHT30(i2c_C2, addr=0x45)
+shtC_w2  = SHT30(i2c_C2, addr=0x44)
+tslC     = TSL2591(i2c_C2)
+
+# حساس الرياح
+wind_pin = Pin(13, Pin.IN)
+
+print("All sensors initialized.")
 
 
 # -----------------------------
 # Read Functions
 # -----------------------------
-def read_A():
-    print("Reading A...")
-    t, h = sht.measure()
-    lux = tsl.lux()
-    print("A READ:", t, h, lux)
-    return (t, h, lux)
+def read_model_A():
+    t1, h1 = shtA1.measure()
+    t2, h2 = shtA2_air.measure()
+    t3, h3 = shtA2_w2.measure()
+    lux = tslA.lux()
+    dist = vl53_A.read()
+    print("A:", t1, h1, t2, h2, t3, h3, lux, dist)
+    return t1, h1, lux, dist
 
-def read_B():
-    print("Reading B...")
-    return read_A()
 
-def read_C():
-    print("Reading C...")
-    t, h = sht.measure()
-    d = tof.read()
-    print("C READ:", t, h, d)
-    return (t, h, d)
+def read_model_B():
+    t1, h1 = shtB_air.measure()
+    t2, h2 = shtB_w2.measure()
+    lux = tslB.lux()
+    dist = vl53_B.read()
+    print("B:", t1, h1, lux, dist)
+    return t1, h1, lux, dist
 
-def read_W():
-    print("Reading Wind...")
-    return (wind_pin.value(), 0, 0)
+
+def read_model_C():
+    t1, h1 = shtC_air.measure()
+    t2, h2 = shtC_w2.measure()
+    lux = tslC.lux()
+    dist = vl53_C.read()
+    print("C:", t1, h1, lux, dist)
+    return t1, h1, lux, dist
+
+
+def read_wind():
+    w = wind_pin.value()
+    print("Wind:", w)
+    return w
 
 
 # -----------------------------
-# Main Loop
+# MAIN LOOP
 # -----------------------------
-print("Connecting WiFi...")
-connect_wifi()
-
-print("First reading...")
-print("A:", read_A())
-print("B:", read_B())
-print("C:", read_C())
-print("W:", read_W())
-
-print("== ENTERING LOOP ==")
+ensure_wifi()
+print("System Ready. Entering loop...")
 
 while True:
-    print("Loop iteration...")
-    time.sleep(10)
+    try:
+        # Reads
+        A = read_model_A()
+        B = read_model_B()
+        C = read_model_C()
+        W = read_wind()
 
-    A_vals = read_A()
-    B_vals = read_B()
-    C_vals = read_C()
-    W_vals = read_W()
+        # Sends
+        ts_send(API_A, A[0], A[1], A[2], A[3])
+        ts_send(API_B, B[0], B[1], B[2], B[3])
+        ts_send(API_C, C[0], C[1], C[2], C[3])
+        ts_send(API_W, W, 0, 0, 0)
 
-    send_ts(API_A, A_vals)
-    send_ts(API_B, B_vals)
-    send_ts(API_C, C_vals)
-    send_ts(API_W, W_vals)
+    except Exception as e:
+        print("MAIN LOOP ERROR:", e)
+
+    time.sleep(15)
 
 
