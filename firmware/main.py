@@ -1,8 +1,10 @@
-
 import time
 import network
 import urequests
 from machine import I2C, SoftI2C, Pin
+
+# استدعاء مكتبة LTR390 الجديدة
+from lib.ltr390 import LTR390
 
 # ===============================
 #  WiFi
@@ -23,45 +25,32 @@ def wifi_connect():
     print("WiFi:", wlan.ifconfig() if wlan.isconnected() else "FAILED")
 
 wifi_connect()
-
 print("MAIN STARTED")
 
 # ===============================
-# Sensors in Model A
+# SHT30 Library
 # ===============================
 
-i2c_a1 = I2C(0, scl=Pin(18), sda=Pin(19))        # A1
-i2c_a2 = I2C(1, scl=Pin(5),  sda=Pin(23))        # A2
-
-# SHT30 library
 class SHT30:
     def __init__(self, i2c, addr=0x44):
         self.i2c = i2c
         self.addr = addr
 
     def read(self):
-        self.i2c.writeto(self.addr, b'\x2C\x06')
-        time.sleep_ms(15)
-        data = self.i2c.readfrom(self.addr, 6)
-        temp = -45 + 175 * ((data[0] << 8) + data[1]) / 65535
-        hum = 100 * ((data[3] << 8) + data[4]) / 65535
-        return round(temp, 2), round(hum, 2)
-
-# LTR390 (UV)
-class LTR390:
-    def __init__(self, i2c, addr=0x53):
-        self.i2c = i2c
-        self.addr = addr
-        self.i2c.writeto_mem(self.addr, 0x00, b'\x01')
-
-    def read_uv(self):
         try:
-            data = self.i2c.readfrom_mem(self.addr, 0x07, 3)
-            return int.from_bytes(data, "little")
+            self.i2c.writeto(self.addr, b'\x2C\x06')
+            time.sleep_ms(15)
+            data = self.i2c.readfrom(self.addr, 6)
+            temp = -45 + 175 * ((data[0] << 8) + data[1]) / 65535
+            hum = 100 * ((data[3] << 8) + data[4]) / 65535
+            return round(temp, 2), round(hum, 2)
         except:
-            return 0
+            return 0, 0
 
-# TSL2591
+# ===============================
+# TSL2591 Library
+# ===============================
+
 class TSL2591:
     def __init__(self, i2c, addr=0x29):
         self.i2c = i2c
@@ -77,9 +66,12 @@ class TSL2591:
             ch1 = self.i2c.readfrom_mem(self.addr, 0x16, 2)
             return int.from_bytes(ch0, "little"), int.from_bytes(ch1, "little")
         except:
-            return (0, 0)
+            return 0, 0
 
-# VL53L0X (simplified)
+# ===============================
+# VL53L0X Simplified
+# ===============================
+
 class VL53L0X:
     def __init__(self, i2c, addr=0x29):
         self.i2c = i2c
@@ -95,8 +87,11 @@ class VL53L0X:
             return 0
 
 # ===============================
-# Create sensor objects
+# I2C Buses — Model A
 # ===============================
+
+i2c_a1 = I2C(0, scl=Pin(18), sda=Pin(19))
+i2c_a2 = I2C(1, scl=Pin(5),  sda=Pin(23))
 
 sht_air_A = SHT30(i2c_a1)
 sht_w2_A  = SHT30(i2c_a2)
@@ -105,7 +100,7 @@ dist_A    = VL53L0X(i2c_a1)
 tsl_A     = TSL2591(i2c_a1)
 
 # ===============================
-# Sensors in Model B
+# I2C Buses — Model B
 # ===============================
 
 i2c_b1 = SoftI2C(scl=Pin(26), sda=Pin(25))
@@ -118,10 +113,10 @@ dist_B    = VL53L0X(i2c_b1)
 tsl_B     = TSL2591(i2c_b1)
 
 # ===============================
-# Sensors in Model C
+# I2C Buses — Model C
 # ===============================
 
-i2c_c1 = SoftI2C(scl=Pin(4), sda=Pin(2))
+i2c_c1 = SoftI2C(scl=Pin(4),  sda=Pin(2))
 i2c_c2 = SoftI2C(scl=Pin(27), sda=Pin(14))
 
 sht_air_C = SHT30(i2c_c1)
@@ -131,7 +126,7 @@ dist_C    = VL53L0X(i2c_c1)
 tsl_C     = TSL2591(i2c_c1)
 
 # ===============================
-# Wind Speed Sensor (GPIO13)
+# Wind Sensor (Speed only)
 # ===============================
 
 wind_pin = Pin(13, Pin.IN, Pin.PULL_UP)
@@ -154,10 +149,10 @@ def get_wind_speed():
 # ThingSpeak APIs
 # ===============================
 
-API_A = "EU6EE36IJ7WSVYP3".strip()
-API_B = "E8CTAK8MCUWLVQJ2".strip()
-API_C = "Y1FWSOX7Z6YZ8QMU".strip()
-API_W = "HG8GG8DF40LCGV99".strip()
+API_A = "EU6EE36IJ7WSVYP3"
+API_B = "E8CTAK8MCUWLVQJ2"
+API_C = "Y1FWSOX7Z6YZ8QMU"
+API_W = "HG8GG8DF40LCGV99"
 
 def send_ts(api, **fields):
     url = "https://api.thingspeak.com/update?api_key=" + api
@@ -171,13 +166,13 @@ def send_ts(api, **fields):
         print("TS ERROR:", e)
 
 # ===============================
-# Main Loop
+# MAIN LOOP
 # ===============================
 
 while True:
     print("\nReading sensors...")
 
-    # ---------- MODEL A ----------
+    # ========== MODEL A ==========
     t_air_A, h_air_A = sht_air_A.read()
     t_w2_A,  h_w2_A  = sht_w2_A.read()
     uvA = uv_A.read_uv()
@@ -195,7 +190,7 @@ while True:
         }
     )
 
-    # ---------- MODEL B ----------
+    # ========== MODEL B ==========
     t_air_B, h_air_B = sht_air_B.read()
     t_w2_B,  h_w2_B  = sht_w2_B.read()
     uvB = uv_B.read_uv()
@@ -213,7 +208,7 @@ while True:
         }
     )
 
-    # ---------- MODEL C ----------
+    # ========== MODEL C ==========
     t_air_C, h_air_C = sht_air_C.read()
     t_w2_C,  h_w2_C  = sht_w2_C.read()
     uvC = uv_C.read_uv()
@@ -231,12 +226,17 @@ while True:
         }
     )
 
-    # ---------- WIND ----------
-    wind = get_wind_speed()
-    send_ts(API_W, **{1: wind})
+    # ========== WIND ==========
+    wind_speed = get_wind_speed()
+    send_ts(API_W,
+        **{
+            1: wind_speed
+        }
+    )
 
-    print("WAITING 30s...")
+    print("Waiting 30s...")
     time.sleep(30)
+
 
 
 
