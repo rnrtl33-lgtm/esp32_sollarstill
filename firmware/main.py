@@ -1,78 +1,75 @@
 import time
 import network
 import urequests
-from machine import I2C, Pin
+from machine import I2C, SoftI2C, Pin
 
-# ================================
-#  WiFi Configuration
-# ================================
-SSID = "HUAWEI-1006VE_Wi-Fi5"
-PASS = "FPdGG9N7"
+# ===================================
+# WIFI
+# ===================================
+SSID = "Abdullah's phone"
+PASS = "42012999"
 
-# ================================
-#  ThingSpeak API Key (A Model)
-# ================================
-API_A = "EU6EE36IJ7WSVYP3"
-
-# ================================
-#  Connect to WiFi
-# ================================
-def wifi_connect():
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-
-    if not wlan.isconnected():
-        wlan.connect(SSID, PASS)
+def wifi():
+    sta = network.WLAN(network.STA_IF)
+    sta.active(True)
+    if not sta.isconnected():
+        sta.connect(SSID, PASS)
         t = 20
-        while not wlan.isconnected() and t > 0:
-            print("Connecting...")
+        while not sta.isconnected() and t > 0:
+            print("Connecting WiFi...")
             time.sleep(1)
             t -= 1
+    print("WiFi:", sta.ifconfig())
 
-    print("WiFi:", wlan.ifconfig())
+wifi()
 
-wifi_connect()
+# ===================================
+# ThingSpeak API (MODEL B)
+# ===================================
+API_B = "E8CTAK8MCUWLVQJ2"
 
-# ================================
-#  Libraries
-# ================================
+# ===================================
+# IMPORT SENSOR LIBRARIES
+# ===================================
 from lib.sht30 import SHT30
-from lib.vl53l0x import VL53L0X
 from lib.ltr390 import LTR390
+from lib.vl53l0x import VL53L0X
 from lib.tsl2591 import TSL2591
 
-# ================================
-#  I2C Bus for Model A
-# ================================
-i2c_a1 = I2C(0, scl=Pin(18), sda=Pin(19))  # LTR390 + VL53 + SHT30-Air + TSL2591
-i2c_a2 = I2C(1, scl=Pin(5),  sda=Pin(23))  # SHT30-Water
-
-# ================================
-#  Initialize Sensors
-# ================================
-sht_air  = SHT30(i2c_a1, addr=0x45)
-ltr      = LTR390(i2c_a1)
-vl53     = VL53L0X(i2c_a1)
-tsl      = TSL2591(i2c_a1)
-sht_w2   = SHT30(i2c_a2, addr=0x44)
-
-# ================================
-#  Safe Read Wrapper
-# ================================
-def safe(f, default=0):
+# ===================================
+# SAFE READ WRAPPER
+# ===================================
+def safe(fn, fallback=0):
     try:
-        return f()
+        return fn()
     except:
-        return default
+        return fallback
 
-# ================================
-#  Send to ThingSpeak
-# ================================
+# ===================================
+# I2C BUS DEFINITIONS — MODEL B
+# ===================================
+# B1: LTR390_B + VL53L0X_B
+i2c_b1 = SoftI2C(scl=Pin(26), sda=Pin(25))
+
+# B2: SHT30-Air_B + SHT30-W2_B + TSL2591_B
+i2c_b2 = SoftI2C(scl=Pin(14), sda=Pin(27))
+
+# ===================================
+# SENSOR INITIALIZATION — MODEL B
+# ===================================
+ltrB   = LTR390(i2c_b1)
+vl53B  = VL53L0X(i2c_b1)
+shtAirB = SHT30(i2c_b2, addr=0x45)
+shtW2B  = SHT30(i2c_b2, addr=0x44)
+tslB    = TSL2591(i2c_b2)
+
+# ===================================
+# SEND TO THINGSPEAK
+# ===================================
 def send_ts(api, **fields):
     url = "https://api.thingspeak.com/update?api_key=" + api
     for k, v in fields.items():
         url += f"&{k}={v}"
-
     try:
         r = urequests.get(url)
         print("TS:", r.text)
@@ -80,41 +77,43 @@ def send_ts(api, **fields):
     except:
         print("TS ERROR")
 
-# ================================
-#  MAIN LOOP (Model A Only)
-# ================================
-print("MAIN STARTED - MODEL A ONLY")
+# ===================================
+# MAIN LOOP — MODEL B ONLY
+# ===================================
+print("MAIN STARTED — MODEL B ONLY")
 
 while True:
 
-    # Read Temperature / Humidity
-    t_air, h_air = safe(lambda: sht_air.read(), (0,0))
-    t_w2,  h_w2  = safe(lambda: sht_w2.read(),  (0,0))
+    # UV
+    uv = safe(lambda: ltrB.read_uv())
 
-    # Read UV
-    uv = safe(lambda: ltr.read_uv())
+    # Distance
+    dist = safe(lambda: vl53B.read())
 
-    # Read Distance
-    dist = safe(lambda: vl53.read())
+    # Temperature / humidity (Air)
+    t_air, h_air = safe(lambda: shtAirB.read(), (0,0))
 
-    # Read Light
-    lux = safe(lambda: tsl.lux())
-    ir  = safe(lambda: tsl.ir())
+    # Water temperature
+    t_w2, h_w2 = safe(lambda: shtW2B.read(), (0,0))
 
-    # Send to ThingSpeak
-    send_ts(API_A,
-        field1=t_air,
-        field2=uv,
-        field3=dist,
-        field4=t_air,
-        field5=t_w2,
-        field6=lux,
-        field7=ir,
-        field8=h_air  # مجرد تعبئة لكي لا يبقى فارغ
+    # Light (Lux + IR)
+    lux = safe(lambda: tslB.lux())
+    ir  = safe(lambda: tslB.ir())
+
+    # SEND
+    send_ts(API_B,
+        field1 = uv,
+        field2 = dist,
+        field3 = t_air,
+        field4 = t_w2,
+        field5 = 0,      # مكان HX711 (محذوف)
+        field6 = lux,
+        field7 = ir
     )
 
-    print("A SENT. Sleeping 15 seconds...\n")
+    print("B SENT. Sleeping 15 sec...\n")
     time.sleep(15)
+
 
 
 
