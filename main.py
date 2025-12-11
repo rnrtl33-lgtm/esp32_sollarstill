@@ -1,6 +1,5 @@
-# ======================================================
-#   main.py  (with Live OTA Injection)
-# ======================================================
+print(">>> OTA VERSION 2 RUNNING <<<")
+
 
 import time
 import gc
