@@ -3,7 +3,7 @@ import urequests
 
 print("MAIN STARTED - THINGSPEAK TEST")
 
-API_KEY = "اكتب_مفتاح_القناة_التي_تريد_الاختبار_عليها"
+API_KEY = "EU6EE36IJ7WSVYP3"
 counter = 0
 
 while True:
