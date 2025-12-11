@@ -1,66 +1,47 @@
 
-import network, urequests, os, machine, time
+import network, time, urequests, os
 
-SSID = "HUAWEI-1006VE_Wi-Fi5"   # عدّلها عند الحاجة
-PASS = "FPdGG9N7"
-
-GITHUB_MAIN = "https://raw.githubusercontent.com/rnrtl33-lgtm/esp32_sollarstill/main/main.py"
-LOCAL_MAIN = "main.py"
+WIFI_SSID = "HUAWEI-1006VE_Wi-Fi5"
+WIFI_PASS = "FPdGG9N7"
+RAW_URL = "https://raw.githubusercontent.com/rnrtl33-lgtm/esp32_sollarstill/main/main.py"
 
 def wifi_connect():
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
-
     if not wlan.isconnected():
         print("Connecting to WiFi...")
-        wlan.connect(SSID, PASS)
+        wlan.connect(WIFI_SSID, WIFI_PASS)
+        while not wlan.isconnected():
+            time.sleep(0.5)
+    print("WiFi:", wlan.ifconfig())
 
-        timeout = 20
-        while not wlan.isconnected() and timeout > 0:
-            time.sleep(1)
-            timeout -= 1
-    
-    if wlan.isconnected():
-        print("WiFi:", wlan.ifconfig())
-    else:
-        print("WiFi: FAILED")
-
-def ota_update():
+def download_main():
     try:
         print("Checking GitHub for updates...")
-        r = urequests.get(GITHUB_MAIN)
-
-        if r.status_code != 200:
-            print("GitHub Error:", r.status_code)
-            return
-
-        remote = r.text
+        r = urequests.get(RAW_URL)
+        new_code = r.text
         r.close()
 
-        # إذا لا يوجد main.py → نزله لأول مرة
-        if LOCAL_MAIN not in os.listdir():
-            print("Downloading main.py (first time)...")
-            with open(LOCAL_MAIN, "w") as f:
-                f.write(remote)
-            machine.reset()
+        if not new_code:
+            print("Error: Empty file")
+            return
 
-        # إذا يوجد → قارن النص
-        with open(LOCAL_MAIN, "r") as f:
-            local = f.read()
+        with open("main.py", "w") as f:
+            f.write(new_code)
 
-        if local != remote:
-            print("New version found → Updating...")
-            with open(LOCAL_MAIN, "w") as f:
-                f.write(remote)
-            machine.reset()
-        else:
-            print("main.py already latest.")
-
+        print("main.py updated.")
     except Exception as e:
-        print("OTA ERROR:", e)
+        print("Update failed:", e)
 
 wifi_connect()
-ota_update()
+
+if "main.py" not in os.listdir():
+    print("Downloading main.py (first time)...")
+    download_main()
+else:
+    print("main.py already exists.")
 
 print("Boot.py OK → Running main.py")
+
+import main
 
