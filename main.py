@@ -1,21 +1,32 @@
+print("MAIN STARTED v2 — ThingSpeak Test")
+
 import time
 import urequests
 
-print("MAIN STARTED - THINGSPEAK TEST")
+# ==== ThingSpeak Channels ====
+TS_A = "EU6EE36IJ7WSVYP3"     # API Model A
+TS_B = "E8CTAK8MCUWLVQJ2"     # API Model B
+TS_C = "Y1FWSOX7Z6YZ8QMU"     # API Model C
+TS_D = "HG8G8BDF40LCGV99"     # API Model D
 
-API_KEY = "EU6EE36IJ7WSVYP3"
-counter = 0
+URL = "https://api.thingspeak.com/update?api_key={}&field1={}"
 
+# ==== Loop ====
 while True:
-    counter += 1
-    url = "https://api.thingspeak.com/update?api_key={}&field1={}".format(API_KEY, counter)
-    
     try:
-        r = urequests.get(url)
-        print("Sent:", counter, " → TS:", r.text)
-        r.close()
+        value = int(time.time() % 1000)   # قيمة رقمية متغيرة لاختبار الارسال
+        print("Sending:", value)
+
+        # إرسال للقنوات:
+        urequests.get(URL.format(TS_A, value))
+        urequests.get(URL.format(TS_B, value))
+        urequests.get(URL.format(TS_C, value))
+        urequests.get(URL.format(TS_D, value))
+
+        print("Sent to ThingSpeak. Waiting 15 sec...")
     except Exception as e:
-        print("ERROR sending:", e)
-    
+        print("Error sending:", e)
+
     time.sleep(15)
+
 
