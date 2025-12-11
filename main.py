@@ -1,32 +1,24 @@
+import time, gc
+from machine import Pin
+
+API_A = "EU6EE36IJ7WSVYP3"
+
+def send(api, value):
+    try:
+        import urequests
+        url = "https://api.thingspeak.com/update?api_key=%s&field1=%s" % (api, value)
+        r = urequests.get(url)
+        r.close()
+        print("Sent:", value)
+    except Exception as e:
+        print("SEND ERROR:", e)
+
+gc.collect()
 print("MAIN STARTED v2 — ThingSpeak Test")
 
-import time
-import urequests
-
-# ==== ThingSpeak Channels ====
-TS_A = "EU6EE36IJ7WSVYP3"     # API Model A
-TS_B = "E8CTAK8MCUWLVQJ2"     # API Model B
-TS_C = "Y1FWSOX7Z6YZ8QMU"     # API Model C
-TS_D = "HG8G8BDF40LCGV99"     # API Model D
-
-URL = "https://api.thingspeak.com/update?api_key={}&field1={}"
-
-# ==== Loop ====
+i = 0
 while True:
-    try:
-        value = int(time.time() % 1000)   # قيمة رقمية متغيرة لاختبار الارسال
-        print("Sending:", value)
-
-        # إرسال للقنوات:
-        urequests.get(URL.format(TS_A, value))
-        urequests.get(URL.format(TS_B, value))
-        urequests.get(URL.format(TS_C, value))
-        urequests.get(URL.format(TS_D, value))
-
-        print("Sent to ThingSpeak. Waiting 15 sec...")
-    except Exception as e:
-        print("Error sending:", e)
-
+    send(API_A, i)
+    i += 1
+    gc.collect()
     time.sleep(15)
-
-
