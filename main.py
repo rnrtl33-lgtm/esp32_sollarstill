@@ -1,10 +1,15 @@
-print(">>> OTA VERSION 2 RUNNING <<<")
+# main.py — unified reader for Models A, B, C, D + OTA Live + Kill Switch
 
+import time, gc, socket, urequests
+from machine import Pin, SoftI2C
 
-import time
-import gc
-import socket
-from machine import SoftI2C, Pin
+# sensor drivers
+from lib.sht30 import SHT30
+from lib.ltr390 import LTR390
+from lib.tsl2591 import TSL2591
+from lib.vl53l0x import VL53L0X
+from lib.hx711 import HX711
+from lib.wind import WindSensor
 
 # ThingSpeak API keys
 API_A = "EU6EE36IJ7WSVYP3"
@@ -12,282 +17,242 @@ API_B = "E8CTAK8MCUWLVQJ2"
 API_C = "Y1FWSOX7Z6YZ8QMU"
 API_D = "HG8G8BDF40LCGV99"
 
-# ------------------------------------------------------
-# Simple HTTP GET using raw sockets
-# ------------------------------------------------------
+# OTA URLs
+RAW_MAIN = "https://raw.githubusercontent.com/rnrtl33-lgtm/esp32_sollarstill/main/main.py"
+RAW_KILL = "https://raw.githubusercontent.com/rnrtl33-lgtm/esp32_sollarstill/main/kill.txt"
 
+
+# -------------- Helper: HTTP GET --------------
 def http_get(url):
     try:
-        _, _, host, path = url.split("/", 3)
+        proto, _, host, path = url.split("/", 3)
         addr = socket.getaddrinfo(host, 80)[0][-1]
 
         s = socket.socket()
         s.connect(addr)
-        s.send(
-            b"GET /" + path.encode() + b" HTTP/1.0\r\n"
-            b"Host: " + host.encode() + b"\r\n\r\n"
-        )
+        s.send(b"GET /" + path.encode() + b" HTTP/1.0\r\nHost:" +
+               host.encode() + b"\r\n\r\n")
 
-        body = b""
+        data = b""
         while True:
-            part = s.recv(128)
+            part = s.recv(256)
             if not part:
                 break
-            body += part
-
+            data += part
         s.close()
 
-        if b"\r\n\r\n" in body:
-            body = body.split(b"\r\n\r\n", 1)[1]
-
+        body = data.split(b"\r\n\r\n", 1)[1]
         return body.decode()
-
-    except Exception as e:
-        print("HTTP_ERR:", e)
+    except:
         return None
 
 
-# ------------------------------------------------------
-# Sensor libraries
-# ------------------------------------------------------
-
-from lib.sht30 import SHT30
-from lib.ltr390 import LTR390
-from lib.tsl2591 import TSL2591
-from lib.vl53l0x import VL53L0X
-
-
-# ------------------------------------------------------
-# I2C bus mapping
-# ------------------------------------------------------
-
-i2c_bus = {
-    "A1": SoftI2C(scl=Pin(18), sda=Pin(19)),
-    "A2": SoftI2C(scl=Pin(5),  sda=Pin(23)),
-    "B1": SoftI2C(scl=Pin(26), sda=Pin(25)),
-    "B2": SoftI2C(scl=Pin(14), sda=Pin(27)),
-    "C1": SoftI2C(scl=Pin(0),  sda=Pin(32)),
-    "C2": SoftI2C(scl=Pin(2),  sda=Pin(15)),
-}
+# -------------- Kill Switch --------------
+def check_kill():
+    try:
+        r = urequests.get(RAW_KILL)
+        flag = r.text.strip()
+        r.close()
+        return flag.upper() == "STOP"
+    except:
+        return False
 
 
-# ------------------------------------------------------
-# Model autodetection
-# ------------------------------------------------------
+# -------------- OTA Live --------------
+def check_ota():
+    try:
+        r = urequests.get(RAW_MAIN)
+        new = r.text
+        r.close()
 
-def detect_model():
-    scans = {}
-    for name, bus in i2c_bus.items():
-        try:
-            scans[name] = bus.scan()
-        except:
-            scans[name] = []
+        with open("main.py") as f:
+            old = f.read()
 
-    if 0x53 in scans.get("A1", []):
-        return "A", scans
+        if new.strip() != old.strip():
+            with open("main.py", "w") as f:
+                f.write(new)
+            print("OTA: New version received → applying update...")
+            time.sleep(1)
+            exec(new, globals())   # reboot into new version
+            return True
 
-    if 0x53 in scans.get("B1", []):
-        return "B", scans
+    except:
+        pass
 
-    if 0x53 in scans.get("C1", []):
-        return "C", scans
-
-    return "NONE", scans
-
-
-MODEL, scans = detect_model()
-print("Detected model:", MODEL)
-print("I2C scan results:", scans)
+    return False
 
 
-# ------------------------------------------------------
-# Model initialization
-# ------------------------------------------------------
+# -------------- Sensors Mapping --------------
+i2cA1 = SoftI2C(scl=Pin(18), sda=Pin(19))
+i2cA2 = SoftI2C(scl=Pin(5),  sda=Pin(23))
+i2cB1 = SoftI2C(scl=Pin(26), sda=Pin(25))
+i2cB2 = SoftI2C(scl=Pin(14), sda=Pin(27))
+i2cC1 = SoftI2C(scl=Pin(0),  sda=Pin(32))
+i2cC2 = SoftI2C(scl=Pin(2),  sda=Pin(15))
 
+# wind + load cell
+wind = WindSensor(13)
+hxA  = HX711(34, 33)
+hxB  = HX711(35, 33)
+hxC  = HX711(36, 33)
+
+
+# -------------- Initialize Each Model --------------
 def init_model_A():
-    A1 = i2c_bus["A1"]
-    A2 = i2c_bus["A2"]
-
     return {
-        "ambient": SHT30(A1, 0x45),
-        "uv":      LTR390(A1, 0x53),
-        "laser":   VL53L0X(A1, 0x29),
-        "air":     SHT30(A2, 0x45),
-        "water":   SHT30(A2, 0x44),
-        "lux":     TSL2591(A2, 0x29),
+        "ambient":  SHT30(i2cA1, addr=0x45),
+        "uv":       LTR390(i2cA1, addr=0x53),
+        "laser":    VL53L0X(i2cA1, addr=0x29),
+        "air":      SHT30(i2cA2, addr=0x45),
+        "water":    SHT30(i2cA2, addr=0x44),
+        "lux":      TSL2591(i2cA2, addr=0x29),
+        "ir":       TSL2591(i2cA2, addr=0x29),
+        "load":     hxA
     }
 
 def init_model_B():
-    B1 = i2c_bus["B1"]
-    B2 = i2c_bus["B2"]
-
     return {
-        "uv":      LTR390(B1, 0x53),
-        "laser":   VL53L0X(B1, 0x29),
-        "air":     SHT30(B2, 0x45),
-        "water":   SHT30(B2, 0x44),
-        "lux":     TSL2591(B2, 0x29),
+        "uv":       LTR390(i2cB1, addr=0x53),
+        "laser":    VL53L0X(i2cB1, addr=0x29),
+        "air":      SHT30(i2cB2, addr=0x45),
+        "water":    SHT30(i2cB2, addr=0x44),
+        "lux":      TSL2591(i2cB2, addr=0x29),
+        "ir":       TSL2591(i2cB2, addr=0x29),
+        "load":     hxB
     }
 
 def init_model_C():
-    C1 = i2c_bus["C1"]
-    C2 = i2c_bus["C2"]
-
     return {
-        "uv":      LTR390(C1, 0x53),
-        "laser":   VL53L0X(C1, 0x29),
-        "air":     SHT30(C2, 0x45),
-        "water":   SHT30(C2, 0x44),
-        "lux":     TSL2591(C2, 0x29),
+        "uv":       LTR390(i2cC1, addr=0x53),
+        "laser":    VL53L0X(i2cC1, addr=0x29),
+        "air":      SHT30(i2cC2, addr=0x45),
+        "water":    SHT30(i2cC2, addr=0x44),
+        "lux":      TSL2591(i2cC2, addr=0x29),
+        "ir":       TSL2591(i2cC2, addr=0x29),
+        "load":     hxC
     }
 
 
-# ------------------------------------------------------
-# Wind sensor
-# ------------------------------------------------------
-
-wind_pin = Pin(13, Pin.IN)
-
-def read_wind():
-    return wind_pin.value()
+sA = init_model_A()
+sB = init_model_B()
+sC = init_model_C()
 
 
-# ------------------------------------------------------
-# Select model
-# ------------------------------------------------------
-
-if MODEL == "A":
-    sensors = init_model_A()
-    API = API_A
-
-elif MODEL == "B":
-    sensors = init_model_B()
-    API = API_B
-
-elif MODEL == "C":
-    sensors = init_model_C()
-    API = API_C
-
-else:
-    sensors = {}
-    API = API_D
-    print("No model detected — wind-only mode")
-
-
-
-# ------------------------------------------------------
-# Read sensors
-# ------------------------------------------------------
-
-def read_all():
+# -------------- Reading Functions --------------
+def read_A():
     out = {}
+    t, h = sA["ambient"].measure()
+    out["ambient_temp"] = t
+    out["ambient_hum"]  = h
 
-    if "ambient" in sensors:
-        t, h = sensors["ambient"].measure()
-        out["ambient_temp"] = t
-        out["ambient_hum"] = h
+    out["uv"]       = sA["uv"].read_uv()
+    out["distance"] = sA["laser"].read()
 
-    if "air" in sensors:
-        t, h = sensors["air"].measure()
-        out["air_temp"] = t
-        out["air_hum"] = h
+    t, h = sA["air"].measure()
+    out["air_temp"] = t
+    out["air_hum"]  = h
 
-    if "water" in sensors:
-        t, h = sensors["water"].measure()
-        out["water_temp"] = t
-        out["water_hum"] = h
+    t, h = sA["water"].measure()
+    out["water_temp"] = t
+    out["water_hum"]  = h
 
-    if "uv" in sensors:
-        out["uv"] = sensors["uv"].read_uv()
-
-    if "lux" in sensors:
-        out["lux"] = sensors["lux"].read_lux()
-
-    if "laser" in sensors:
-        out["distance"] = sensors["laser"].read()
-
-    out["wind"] = read_wind()
+    out["lux"]  = sA["lux"].read_lux()
+    out["ir"]   = sA["ir"].read_ir()
+    out["load"] = sA["load"].read()
 
     return out
 
 
+def read_B():
+    out = {}
+    out["uv"]       = sB["uv"].read_uv()
+    out["distance"] = sB["laser"].read()
 
-# ------------------------------------------------------
-# Upload to ThingSpeak
-# ------------------------------------------------------
+    t, h = sB["air"].measure()
+    out["air_temp"] = t
+    out["air_hum"]  = h
 
-def send_to_ts(values):
-    url = "http://api.thingspeak.com/update?api_key=" + API
+    t, h = sB["water"].measure()
+    out["water_temp"] = t
+    out["water_hum"]  = h
+
+    out["load"] = sB["load"].read()
+    out["lux"]  = sB["lux"].read_lux()
+    out["ir"]   = sB["ir"].read_ir()
+
+    return out
+
+
+def read_C():
+    out = {}
+    out["uv"]       = sC["uv"].read_uv()
+    out["distance"] = sC["laser"].read()
+
+    t, h = sC["air"].measure()
+    out["air_temp"] = t
+    out["air_hum"]  = h
+
+    t, h = sC["water"].measure()
+    out["water_temp"] = t
+    out["water_hum"]  = h
+
+    out["load"] = sC["load"].read()
+    out["lux"]  = sC["lux"].read_lux()
+    out["ir"]   = sC["ir"].read_ir()
+
+    return out
+
+
+def read_D():
+    return {"wind_speed": wind.read()}
+
+
+# -------------- Send to ThingSpeak --------------
+def send_ts(api, data):
+    url = "http://api.thingspeak.com/update?api_key=" + api
     i = 1
-    for v in values.values():
+    for v in data.values():
         url += "&field{}={}".format(i, v)
         i += 1
-
-    resp = http_get(url)
-    print("TS:", resp)
+    print("TS →", http_get(url))
 
 
+# =====================================================
+#                     MAIN LOOP
+# =====================================================
 
-# ======================================================
-#   **** LIVE OTA MODULE (injected here) ****
-# ======================================================
+print("\n>>> Unified A+B+C+D Reader Running <<<\n")
 
-import urequests
-
-RAW_URL = "https://raw.githubusercontent.com/rnrtl33-lgtm/esp32_sollarstill/main/main.py"
-_last_code = None
-
-def check_live_update():
-    global _last_code
-
-    try:
-        r = urequests.get(RAW_URL)
-        new_code = r.text
-        r.close()
-
-        # First cycle → store current code and exit
-        if _last_code is None:
-            _last_code = new_code
-            return
-
-        # If nothing changed → ignore
-        if new_code == _last_code:
-            return
-
-        print("LIVE OTA: New version detected!")
-
-        # Backup old code
-        with open("main_old.py", "w") as f:
-            f.write(_last_code)
-
-        # Save new version
-        with open("main_new.py", "w") as f:
-            f.write(new_code)
-
-        _last_code = new_code
-
-        print("LIVE OTA: Running new version now.\n")
-        exec(new_code, globals())
-
-    except Exception as e:
-        print("LIVE_OTA_ERR:", e)
-
-
-
-# ======================================================
-#   MAIN LOOP
-# ======================================================
+MAIN_CODE = open("main.py").read()
 
 while True:
-    gc.collect()
 
-    data = read_all()
-    print("DATA:", data)
-    send_to_ts(data)
+    # Kill switch
+    if check_kill():
+        print("Kill switch triggered — stopping.")
+        break
 
-    #### **** LIVE OTA CHECK HERE **** ####
-    check_live_update()
+    # OTA Live
+    if check_ota():
+        break
 
+    # Read each model
+    A = read_A()
+    B = read_B()
+    C = read_C()
+    D = read_D()
+
+    print("A:", A)
+    print("B:", B)
+    print("C:", C)
+    print("D:", D)
+
+    # Send to TS
+    send_ts(API_A, A)
+    send_ts(API_B, B)
+    send_ts(API_C, C)
+    send_ts(API_D, D)
+
+    print("Sleeping 20s...\n")
     time.sleep(20)
 
- 
