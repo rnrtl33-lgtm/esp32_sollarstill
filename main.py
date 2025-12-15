@@ -16,7 +16,7 @@ API_A = "EU6EE36IJ7WSVYP3"
 API_B = "E8CTAK8MCUWLVQJ2"
 API_C = "Y1FWSOX7Z6YZ8QMU"
 API_D = "HG8G8BDF40LCGV99"
-
+# test test 
 # OTA URLs
 RAW_MAIN = "https://raw.githubusercontent.com/rnrtl33-lgtm/esp32_sollarstill/main/main.py"
 RAW_KILL = "https://raw.githubusercontent.com/rnrtl33-lgtm/esp32_sollarstill/main/kill.txt"
