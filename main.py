@@ -255,4 +255,5 @@ while True:
 
     print("Sleeping 20s...\n")
     time.sleep(20)
+print(">>> VERSION TEST 7 <<<")
 
