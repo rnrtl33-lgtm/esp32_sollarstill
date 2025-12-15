@@ -1,36 +1,75 @@
-import network, time, urequests, os
+import network, time, urequests, os, machine
 
-WIFI_SSID = "Abdullah's phone"
-WIFI_PASS = "42012999"
+WIFI_SSID = "Hassan"
+WIFI_PASS = "H7654321"
 
-RAW_MAIN = "https://raw.githubusercontent.com/rnrtl33-lgtm/esp32_sollarstill/main/main.py"
+RAW_URL = "https://raw.githubusercontent.com/rnrtl33-lgtm/esp32_sollarstill/main/main.py"
 
-def connect_wifi():
+
+def wifi_connect():
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     if not wlan.isconnected():
+        print("Connecting to WiFi...")
         wlan.connect(WIFI_SSID, WIFI_PASS)
         while not wlan.isconnected():
-            time.sleep(0.5)
+            time.sleep(0.4)
+
     print("WiFi OK:", wlan.ifconfig())
+
+
+def get_remote_code():
+    print("Checking GitHub...")
+    r = urequests.get(RAW_URL)
+    txt = r.text
+    r.close()
+    return txt
+
+
+def get_local_code():
+    if "main.py" not in os.listdir():
+        return None
+    try:
+        with open("main.py", "r") as f:
+            return f.read()
+    except:
+        return None
+
 
 def update_main():
     try:
-        r = urequests.get(RAW_MAIN)
-        new = r.text
-        r.close()
-        if new:
+        remote = get_remote_code()
+        local  = get_local_code()
+
+        if local is None:
+            print("Local main.py missing → downloading new copy.")
             with open("main.py", "w") as f:
-                f.write(new)
-            print("main.py updated.")
-    except:
-        print("Could not fetch main.py")
+                f.write(remote)
+            print("main.py saved (first install).")
+            return True
 
-connect_wifi()
+        if remote.strip() != local.strip():
+            print("New version detected → updating main.py ...")
+            with open("main.py", "w") as f:
+                f.write(remote)
+            print("✔️ Update finished.")
+            return True
 
-if "main.py" not in os.listdir():
-    update_main()
-else:
-    print("main.py exists.")
+        print("No update needed.")
+        return False
 
-print("Boot done → running main.py")
+    except Exception as e:
+        print("Update error:", e)
+        return False
+
+
+
+wifi_connect()
+changed = update_main()
+
+print("Boot.py OK → Running main.py")
+
+try:
+    import main
+except Exception as e:
+    print("main.py error:", e)
