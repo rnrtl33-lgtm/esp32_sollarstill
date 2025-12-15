@@ -1,75 +1,36 @@
-import network, time, urequests, os, machine
+import network, time, urequests, os
 
-WIFI_SSID = "HUAWEI-1006VE_Wi-Fi5"
-WIFI_PASS = "FPdGG9N7"
+WIFI_SSID = "Abdullah's phone"
+WIFI_PASS = "42012999"
 
-RAW_URL = "https://raw.githubusercontent.com/rnrtl33-lgtm/esp32_sollarstill/main/main.py"
+RAW_MAIN = "https://raw.githubusercontent.com/rnrtl33-lgtm/esp32_sollarstill/main/main.py"
 
-
-def wifi_connect():
+def connect_wifi():
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     if not wlan.isconnected():
-        print("Connecting to WiFi...")
         wlan.connect(WIFI_SSID, WIFI_PASS)
         while not wlan.isconnected():
-            time.sleep(0.4)
-
+            time.sleep(0.5)
     print("WiFi OK:", wlan.ifconfig())
-
-
-def get_remote_code():
-    print("Checking GitHub...")
-    r = urequests.get(RAW_URL)
-    txt = r.text
-    r.close()
-    return txt
-
-
-def get_local_code():
-    if "main.py" not in os.listdir():
-        return None
-    try:
-        with open("main.py", "r") as f:
-            return f.read()
-    except:
-        return None
-
 
 def update_main():
     try:
-        remote = get_remote_code()
-        local  = get_local_code()
-
-        if local is None:
-            print("Local main.py missing → downloading new copy.")
+        r = urequests.get(RAW_MAIN)
+        new = r.text
+        r.close()
+        if new:
             with open("main.py", "w") as f:
-                f.write(remote)
-            print("main.py saved (first install).")
-            return True
+                f.write(new)
+            print("main.py updated.")
+    except:
+        print("Could not fetch main.py")
 
-        if remote.strip() != local.strip():
-            print("New version detected → updating main.py ...")
-            with open("main.py", "w") as f:
-                f.write(remote)
-            print("✔️ Update finished.")
-            return True
+connect_wifi()
 
-        print("No update needed.")
-        return False
+if "main.py" not in os.listdir():
+    update_main()
+else:
+    print("main.py exists.")
 
-    except Exception as e:
-        print("Update error:", e)
-        return False
-
-
-# ===== EXECUTION START =====
-wifi_connect()
-changed = update_main()
-
-print("Boot.py OK → Running main.py")
-
-try:
-    import main
-except Exception as e:
-    print("main.py error:", e)
+print("Boot done → running main.py")
