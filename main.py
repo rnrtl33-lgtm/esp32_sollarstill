@@ -232,9 +232,9 @@ while True:
         print("Kill switch triggered — stopping.")
         break
 
-    # OTA Live
-    if check_ota():
-        break
+   if check_ota():
+    print("OTA: New version downloaded. Apply on next reset.")
+
 
     # Read each model
     A = read_A()
