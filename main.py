@@ -1,5 +1,8 @@
 
 
+# main.py — Unified A+B+C+D Reader + ThingSpeak + OTA Live + Kill Switch
+# (Version without WindSensor — Safe when sensor is not connected)
+
 import time, gc, socket, urequests
 from machine import Pin, SoftI2C
 
@@ -9,7 +12,6 @@ from lib.ltr390 import LTR390
 from lib.tsl2591 import TSL2591
 from lib.vl53l0x import VL53L0X
 from lib.hx711 import HX711
-from lib.wind import WindSensor
 
 # ThingSpeak keys
 API_A = "EU6EE36IJWSVYP3"
@@ -60,7 +62,7 @@ def check_kill():
 
 
 # -------------------------------------------------
-# OTA Live (فقط مقارنة واستبدال الملف)
+# OTA Live
 # -------------------------------------------------
 def check_ota():
     try:
@@ -98,9 +100,7 @@ i2cB2 = SoftI2C(scl=Pin(14), sda=Pin(27))
 i2cC1 = SoftI2C(scl=Pin(0),  sda=Pin(32))
 i2cC2 = SoftI2C(scl=Pin(2),  sda=Pin(15))
 
-
-# Wind / weight sensors
-wind = WindSensor(13)
+# Load cells only
 hxA  = HX711(34, 33)
 hxB  = HX711(35, 33)
 hxC  = HX711(36, 33)
@@ -168,7 +168,6 @@ def read_A():
 
     out["lux"]   = sA["lux"].read_lux()
     out["load"]  = sA["load"].read()
-    out["wind"]  = wind.read()
 
     return out
 
@@ -188,7 +187,6 @@ def read_B():
 
     out["lux"]  = sB["lux"].read_lux()
     out["load"] = sB["load"].read()
-    out["wind"] = wind.read()
 
     return out
 
@@ -208,14 +206,13 @@ def read_C():
 
     out["lux"]  = sC["lux"].read_lux()
     out["load"] = sC["load"].read()
-    out["wind"] = wind.read()
 
     return out
 
 
-# Model D (wind only)
 def read_D():
-    return {"wind": wind.read()}
+    # No wind sensor now → return constant 0
+    return {"wind": 0}
 
 
 # -------------------------------------------------
@@ -233,7 +230,7 @@ def send_ts(api_key, data):
 # =====================================================
 #                         LOOP
 # =====================================================
-print("\n>>> Unified Reader Is Running <<<\n")
+print("\n>>> Unified Reader (no WindSensor) is running <<<\n")
 
 while True:
 
