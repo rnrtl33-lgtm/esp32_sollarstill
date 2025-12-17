@@ -1,138 +1,142 @@
-import time, socket, gc
+
+import time, gc
 from machine import Pin, SoftI2C, reset
 
-
+ 
 from lib.sht30_clean import SHT30
 from lib.ltr390_fixed import LTR390
 from lib.tsl2591_fixed import TSL2591
 from lib.vl53l0x_clean import VL53L0X
 from lib.hx711_simple import HX711
 
+ 
+ 
+API_A = "EU6EE36IJ7WSVYP3"
+API_B = "E8CTAK8MCUWLVQJ2"
+API_C = "Y1FWSOX7Z6YZ8QMU"
+API_D = "HG8G8BDF40LCGV99"
 
-TS_A = "EU6EE36IJ7WSVYP3"
-TS_B = "E8CTAK8MCUWLVQJ2"
-TS_C = "Y1FWSOX7Z6YZ8QMU"
-TS_D = "HG8G8DF40LCGV99"
+ 
+# I2C BUSES
+ 
+# Model A
+i2c_A1 = SoftI2C(scl=Pin(18), sda=Pin(19))
+i2c_A2 = SoftI2C(scl=Pin(5),  sda=Pin(23))
 
+# Model B
+i2c_B1 = SoftI2C(scl=Pin(26), sda=Pin(25))
+i2c_B2 = SoftI2C(scl=Pin(14), sda=Pin(27))
 
-def ts_send(key, data):
-    url = "http://api.thingspeak.com/update?api_key=" + key
-    i = 1
-    for v in data:
-        url += "&field{}={}".format(i, v)
-        i += 1
+# Model C
+i2c_C1 = SoftI2C(scl=Pin(0),  sda=Pin(32))
+i2c_C2 = SoftI2C(scl=Pin(2),  sda=Pin(15))
 
-    try:
-        addr = socket.getaddrinfo("api.thingspeak.com", 80)[0][-1]
-        s = socket.socket()
-        s.connect(addr)
-        s.send(b"GET " + url.split("http://api.thingspeak.com")[1].encode() + b" HTTP/1.0\r\nHost: api.thingspeak.com\r\n\r\n")
-        s.close()
-    except:
-        pass
+ 
+hxA = HX711(34, 33)
+hxB = HX711(35, 33)
+hxC = HX711(36, 33)
 
-
-i2cA1 = SoftI2C(scl=Pin(18), sda=Pin(19))
-i2cA2 = SoftI2C(scl=Pin(5),  sda=Pin(23))
-
-i2cB1 = SoftI2C(scl=Pin(26), sda=Pin(25))
-i2cB2 = SoftI2C(scl=Pin(14), sda=Pin(27))
-
-i2cC1 = SoftI2C(scl=Pin(0),  sda=Pin(32))
-i2cC2 = SoftI2C(scl=Pin(2),  sda=Pin(15))
-
-
-hxA = HX711(dt=34, sck=33)
-hxB = HX711(dt=35, sck=33)
-hxC = HX711(dt=36, sck=33)
-
-
-wind_pin = Pin(4, Pin.IN)
-wind_pulses = 0
-
-def wind_irq(p):
-    global wind_pulses
-    wind_pulses += 1
-
-wind_pin.irq(trigger=Pin.IRQ_RISING, handler=wind_irq)
-
-
+ 
 A = {
-    "amb": SHT30(i2cA1, 0x45),
-    "air": SHT30(i2cA2, 0x45),
-    "wat": SHT30(i2cA2, 0x44),
-    "uv":  LTR390(i2cA1),
-    "lux": TSL2591(i2cA2),
-    "dis": VL53L0X(i2cA1),
+    "amb": SHT30(i2c_A1, 0x45),
+    "air": SHT30(i2c_A2, 0x45),
+    "wat": SHT30(i2c_A2, 0x44),
+    "uv":  LTR390(i2c_A1),
+    "lux": TSL2591(i2c_A2),
+    "dis": VL53L0X(i2c_A1),
+    "hx":  hxA
 }
 
 B = {
-    "air": SHT30(i2cB2, 0x45),
-    "wat": SHT30(i2cB2, 0x44),
-    "uv":  LTR390(i2cB1),
-    "lux": TSL2591(i2cB2),
-    "dis": VL53L0X(i2cB1),
+    "air": SHT30(i2c_B2, 0x45),
+    "wat": SHT30(i2c_B2, 0x44),
+    "uv":  LTR390(i2c_B1),
+    "lux": TSL2591(i2c_B2),
+    "dis": VL53L0X(i2c_B1),
+    "hx":  hxB
 }
 
 C = {
-    "air": SHT30(i2cC2, 0x45),
-    "wat": SHT30(i2cC2, 0x44),
-    "uv":  LTR390(i2cC1),
-    "lux": TSL2591(i2cC2),
+    "air": SHT30(i2c_C2, 0x45),
+    "wat": SHT30(i2c_C2, 0x44),
+    "uv":  LTR390(i2c_C1),
+    "lux": TSL2591(i2c_C2),
+    "dis": VL53L0X(i2c_C1),
+    "hx":  hxC
 }
 
-print("\n>>> SYSTEM RUNNING (A+B+C+D) <<<\n")
+ 
+def send_ts(api, data):
+    try:
+        url = "https://api.thingspeak.com/update?api_key=" + api
+        i = 1
+        for v in data.values():
+            url += "&field{}={}".format(i, v)
+            i += 1
+        import urequests
+        r = urequests.get(url)
+        r.close()
+    except Exception as e:
+        print("TS error:", e)
+
+ 
+def read_model(m, with_amb=False):
+    out = {}
+
+    if with_amb:
+        t,h = m["amb"].measure()
+        out["T_amb"] = t
+        out["H_amb"] = h
+
+    t,h = m["air"].measure()
+    out["T_air"] = t
+    out["H_air"] = h
+
+    t,h = m["wat"].measure()
+    out["T_wat"] = t
+    out["H_wat"] = h
+
+    out["ALS"] = m["uv"].read_als()
+    out["UV"]  = m["uv"].read_uv()
+
+    full, ir = m["lux"].get_raw_luminosity()
+    out["LUX"] = m["lux"].calculate_lux(full, ir)
+    out["IR"]  = ir
+
+    try:
+        out["DIST_mm"] = m["dis"].read()
+    except:
+        out["DIST_mm"] = None
+
+    out["WEIGHT_g"] = m["hx"].get_weight()
+
+    return out
+
+ 
+print("\n>>> MAIN RUNNING (A+B+C+D) <<<\n")
 
 cycle = 0
 
 while True:
-    
-    Ta, Ha = A["amb"].measure()
-    Tair, Hair = A["air"].measure()
-    Tw, Hw = A["wat"].measure()
-    alsA = A["uv"].read_als()
-    uvA  = A["uv"].read_uv()
-    full, ir = A["lux"].get_raw_luminosity()
-    luxA = A["lux"].calculate_lux(full, ir)
-    distA = A["dis"].read()
-    wA = hxA.get_weight()
+    dataA = read_model(A, True)
+    dataB = read_model(B)
+    dataC = read_model(C)
+    dataD = {"WIND_m_s": 0.0}
 
-    ts_send(TS_A, [Ta, alsA, distA, Tair, Tw, luxA, ir, wA])
+    print("A:", dataA)
+    print("B:", dataB)
+    print("C:", dataC)
+    print("D:", dataD)
+    print("-" * 70)
 
-   
-    TairB, HairB = B["air"].measure()
-    TwB, HwB = B["wat"].measure()
-    alsB = B["uv"].read_als()
-    uvB  = B["uv"].read_uv()
-    fullB, irB = B["lux"].get_raw_luminosity()
-    luxB = B["lux"].calculate_lux(fullB, irB)
-    distB = B["dis"].read()
-    wB = hxB.get_weight()
+    send_ts(API_A, dataA)
+    send_ts(API_B, dataB)
+    send_ts(API_C, dataC)
+    send_ts(API_D, dataD)
 
-    ts_send(TS_B, [uvB, distB, TairB, TwB, wB, luxB, irB])
-
-   
-    TairC, HairC = C["air"].measure()
-    TwC, HwC = C["wat"].measure()
-    alsC = C["uv"].read_als()
-    uvC  = C["uv"].read_uv()
-    fullC, irC = C["lux"].get_raw_luminosity()
-    luxC = C["lux"].calculate_lux(fullC, irC)
-    wC = hxC.get_weight()
-
-    ts_send(TS_C, [uvC, None, TairC, TwC, luxC, irC, wC])
-
-    
-    p = wind_pulses
-    wind_pulses = 0
-    wind_speed = (p / 2) * 0.4
-    ts_send(TS_D, [wind_speed])
-
-    print("Cycle:", cycle)
     cycle += 1
-
-    if cycle >= 15:  
-        print("Auto reset for OTA")
+    if cycle >= 15:       
+        print("Auto reset for OTA...")
         time.sleep(2)
         reset()
 
