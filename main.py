@@ -1,6 +1,4 @@
-# ==============================
-# main.py — MODEL B ONLY (OTA Update)
-# ==============================
+
 
 import time, gc
 from machine import Pin, SoftI2C, reset
@@ -12,30 +10,64 @@ from lib.tsl2591_fixed import TSL2591
 from lib.vl53l0x_clean import VL53L0X
 from lib.hx711_simple import HX711
 
-# ==============================
-# ThingSpeak API (MODEL B)
-# ==============================
+
+API_A = "EU6EE36IJ7WSVYP3"
 API_B = "E8CTAK8MCUWLVQJ2"
+API_C = "Y1FWSOX7Z6YZ8QMU"
+API_D = "HG8G8BDF40LCGV99"
 
 # ==============================
-# I2C (MODEL B)
+# I2C BUSES
 # ==============================
+# Model A
+i2c_A1 = SoftI2C(scl=Pin(18), sda=Pin(19))
+i2c_A2 = SoftI2C(scl=Pin(5),  sda=Pin(23))
+
+# Model B
 i2c_B1 = SoftI2C(scl=Pin(26), sda=Pin(25))
 i2c_B2 = SoftI2C(scl=Pin(14), sda=Pin(27))
 
-# ==============================
-# HX711 (MODEL B)
-# ==============================
-hxB = HX711(35, 33)
+# Model C
+i2c_C1 = SoftI2C(scl=Pin(0),  sda=Pin(32))
+i2c_C2 = SoftI2C(scl=Pin(2),  sda=Pin(15))
 
 # ==============================
-# Sensors (MODEL B)
+# HX711 (⚠️ بدون dt / sck)
 # ==============================
-B_air   = SHT30(i2c_B2, 0x45)
-B_wat   = SHT30(i2c_B2, 0x44)
-B_uv    = LTR390(i2c_B1)
-B_lux   = TSL2591(i2c_B2)
-B_laser = VL53L0X(i2c_B1)
+hxA = HX711(34, 33)
+hxB = HX711(35, 33)
+hxC = HX711(36, 33)
+
+# ==============================
+# Sensors Init
+# ==============================
+A = {
+    "amb": SHT30(i2c_A1, 0x45),
+    "air": SHT30(i2c_A2, 0x45),
+    "wat": SHT30(i2c_A2, 0x44),
+    "uv":  LTR390(i2c_A1),
+    "lux": TSL2591(i2c_A2),
+    "dis": VL53L0X(i2c_A1),
+    "hx":  hxA
+}
+
+B = {
+    "air": SHT30(i2c_B2, 0x45),
+    "wat": SHT30(i2c_B2, 0x44),
+    "uv":  LTR390(i2c_B1),
+    "lux": TSL2591(i2c_B2),
+    "dis": VL53L0X(i2c_B1),
+    "hx":  hxB
+}
+
+C = {
+    "air": SHT30(i2c_C2, 0x45),
+    "wat": SHT30(i2c_C2, 0x44),
+    "uv":  LTR390(i2c_C1),
+    "lux": TSL2591(i2c_C2),
+    "dis": VL53L0X(i2c_C1),
+    "hx":  hxC
+}
 
 # ==============================
 # ThingSpeak Sender
@@ -54,53 +86,69 @@ def send_ts(api, data):
         print("TS error:", e)
 
 # ==============================
-# MAIN LOOP
+# Read Functions
 # ==============================
-print("\n>>> OTA UPDATE: MODEL B ONLY <<<\n")
+def read_model(m, with_amb=False):
+    out = {}
 
-START = time.time()
+    if with_amb:
+        t,h = m["amb"].measure()
+        out["T_amb"] = t
+        out["H_amb"] = h
 
-while True:
-    # ---- READ MODEL B ----
-    T_air, H_air = B_air.measure()
-    T_wat, H_wat = B_wat.measure()
+    t,h = m["air"].measure()
+    out["T_air"] = t
+    out["H_air"] = h
 
-    ALS = B_uv.read_als()
-    UV  = B_uv.read_uv()
+    t,h = m["wat"].measure()
+    out["T_wat"] = t
+    out["H_wat"] = h
 
-    full, IR = B_lux.get_raw_luminosity()
-    LUX = B_lux.calculate_lux(full, IR)
+    out["ALS"] = m["uv"].read_als()
+    out["UV"]  = m["uv"].read_uv()
+
+    full, ir = m["lux"].get_raw_luminosity()
+    out["LUX"] = m["lux"].calculate_lux(full, ir)
+    out["IR"]  = ir
 
     try:
-        DIST = B_laser.read()
+        out["DIST_mm"] = m["dis"].read()
     except:
-        DIST = None
+        out["DIST_mm"] = None
 
-    WEIGHT = hxB.get_weight()
+    out["WEIGHT_g"] = m["hx"].get_weight()
 
-    dataB = {
-        "T_air": T_air,
-        "H_air": H_air,
-        "T_wat": T_wat,
-        "H_wat": H_wat,
-        "ALS": ALS,
-        "UV": UV,
-        "LUX": LUX,
-        "IR": IR,
-        "DIST_mm": DIST,
-        "WEIGHT_g": WEIGHT
-    }
+    return out
 
-    print("MODEL B:", dataB)
+# ==============================
+# MAIN LOOP
+# ==============================
+print("\n>>> MAIN RUNNING (A+B+C+D) <<<\n")
 
+cycle = 0
+
+while True:
+    dataA = read_model(A, True)
+    dataB = read_model(B)
+    dataC = read_model(C)
+    dataD = {"WIND_m_s": 0.0}
+
+    print("A:", dataA)
+    print("B:", dataB)
+    print("C:", dataC)
+    print("D:", dataD)
+    print("-" * 70)
+
+    send_ts(API_A, dataA)
     send_ts(API_B, dataB)
+    send_ts(API_C, dataC)
+    send_ts(API_D, dataD)
 
-    time.sleep(20)
-
-    # ---- OTA LIVE RESET (≈5 minutes) ----
-    if time.time() - START > 300:
-        print("OTA cycle restart...")
+    cycle += 1
+    if cycle >= 15:      # ≈ 5 minutes
+        print("Auto reset for OTA...")
         time.sleep(2)
         reset()
 
     gc.collect()
+    time.sleep(20)
