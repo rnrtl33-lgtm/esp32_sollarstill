@@ -1,1 +1,2 @@
-print ("test test test tes") 
+print(">>> OTA VERSION TEST OK <<<")
+
