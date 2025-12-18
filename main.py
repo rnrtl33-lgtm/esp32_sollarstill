@@ -1,4 +1,8 @@
-
+# ==================================================
+# main.py — Models A + B + C + D
+# Correct Timing / Stable Readings
+# LTR390 = UV ONLY
+# ==================================================
 
 import time, gc
 from machine import Pin, SoftI2C, reset
@@ -62,17 +66,21 @@ def wind_irq(pin):
 
 wind_pin.irq(trigger=Pin.IRQ_RISING, handler=wind_irq)
 
-# ------------------
-# Safe Readers
-# ------------------
+# ==================================================
+# SAFE READERS (THE IMPORTANT PART)
+# ==================================================
+
 def read_sht(sensor):
     try:
+        sensor.measure()          # force new conversion
+        time.sleep_ms(50)
         t, h = sensor.measure()
         if -40 < t < 85 and 0 <= h <= 100:
             return t, h
     except:
         pass
     return None, None
+
 
 def read_uv(sensor):
     try:
@@ -84,14 +92,20 @@ def read_uv(sensor):
     except:
         return None
 
+
 def read_lux(sensor):
     try:
+        sensor._enable()
+        sensor._set_timing()
         time.sleep_ms(400)
         full, ir = sensor.get_raw_luminosity()
+        if full == 0 and ir == 0:
+            return None, None
         lux = sensor.calculate_lux(full, ir)
         return lux, ir
     except:
         return None, None
+
 
 def read_dist(sensor):
     try:
@@ -115,24 +129,19 @@ def send_ts(api, data):
     except:
         pass
 
-# ------------------
+# ==================================================
 # MAIN LOOP
-# ------------------
-print("\n>>> MAIN RUNNING (TIMING SAFE) <<<\n")
+# ==================================================
+print("\n>>> MAIN RUNNING — TIMING CORRECT <<<\n")
 
 cycle = 0
 
 while True:
 
-    # ===== A =====
-    T_amb, H_amb = read_sht(A_amb)
-    time.sleep_ms(100)
-
-    T_airA, H_airA = read_sht(A_air)
-    time.sleep_ms(100)
-
-    T_watA, H_watA = read_sht(A_wat)
-    time.sleep_ms(150)
+    # ===== Model A =====
+    T_amb, H_amb   = read_sht(A_amb);  time.sleep_ms(80)
+    T_airA, H_airA = read_sht(A_air);  time.sleep_ms(80)
+    T_watA, H_watA = read_sht(A_wat);  time.sleep_ms(120)
 
     UV_A = read_uv(A_uv)
     LUX_A, IR_A = read_lux(A_lux)
@@ -151,12 +160,9 @@ while True:
         "DIST": DIST_A
     }
 
-    # ===== B =====
-    T_airB, H_airB = read_sht(B_air)
-    time.sleep_ms(100)
-
-    T_watB, H_watB = read_sht(B_wat)
-    time.sleep_ms(150)
+    # ===== Model B =====
+    T_airB, H_airB = read_sht(B_air); time.sleep_ms(80)
+    T_watB, H_watB = read_sht(B_wat); time.sleep_ms(120)
 
     UV_B = read_uv(B_uv)
     LUX_B, IR_B = read_lux(B_lux)
@@ -173,12 +179,9 @@ while True:
         "DIST": DIST_B
     }
 
-    # ===== C =====
-    T_airC, H_airC = read_sht(C_air)
-    time.sleep_ms(100)
-
-    T_watC, H_watC = read_sht(C_wat)
-    time.sleep_ms(150)
+    # ===== Model C =====
+    T_airC, H_airC = read_sht(C_air); time.sleep_ms(80)
+    T_watC, H_watC = read_sht(C_wat); time.sleep_ms(120)
 
     UV_C = read_uv(C_uv)
     LUX_C, IR_C = read_lux(C_lux)
@@ -195,7 +198,7 @@ while True:
         "DIST": DIST_C
     }
 
-    # ===== D =====
+    # ===== Model D =====
     pulses = wind_pulses
     wind_pulses = 0
     WIND = pulses * 0.4
