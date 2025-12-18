@@ -1,6 +1,7 @@
 # ==================================================
 # main.py — Unified Models A+B+C+D (NO WEIGHT)
 # ThingSpeak + OTA Live (reset-cycle)
+# Solution 1: Startup Delay ONLY
 # ==================================================
 
 import time, gc
@@ -14,6 +15,12 @@ from lib.ltr390_fixed import LTR390
 from lib.tsl2591_fixed import TSL2591
 from lib.vl53l0x_clean import VL53L0X
 
+# ==============================
+# STARTUP DELAY (CRITICAL)
+# ==============================
+print("Waiting for sensors to stabilize...")
+time.sleep(3)
+
 # ------------------
 # ThingSpeak API Keys
 # ------------------
@@ -23,19 +30,19 @@ API_C = "Y1FWSOX7Z6YZ8QMU"
 API_D = "HG8G8BDF40LCGV99"
 
 # ------------------
-# I2C Buses
+# I2C Buses (100 kHz)
 # ------------------
 # Model A
-i2cA1 = SoftI2C(scl=Pin(18), sda=Pin(19))
-i2cA2 = SoftI2C(scl=Pin(5),  sda=Pin(23))
+i2cA1 = SoftI2C(scl=Pin(18), sda=Pin(19), freq=100000)
+i2cA2 = SoftI2C(scl=Pin(5),  sda=Pin(23), freq=100000)
 
 # Model B
-i2cB1 = SoftI2C(scl=Pin(26), sda=Pin(25))
-i2cB2 = SoftI2C(scl=Pin(14), sda=Pin(27))
+i2cB1 = SoftI2C(scl=Pin(26), sda=Pin(25), freq=100000)
+i2cB2 = SoftI2C(scl=Pin(14), sda=Pin(27), freq=100000)
 
 # Model C
-i2cC1 = SoftI2C(scl=Pin(0),  sda=Pin(32))
-i2cC2 = SoftI2C(scl=Pin(2),  sda=Pin(15))
+i2cC1 = SoftI2C(scl=Pin(0),  sda=Pin(32), freq=100000)
+i2cC2 = SoftI2C(scl=Pin(2),  sda=Pin(15), freq=100000)
 
 # ------------------
 # Sensors Init
@@ -93,10 +100,9 @@ def send_ts(api, data):
 # ------------------
 # MAIN LOOP
 # ------------------
-print("\n>>> MAIN RUNNING (A+B+C+D | NO WEIGHT) <<<\n")
+print("\n>>> MAIN RUNNING (STARTUP DELAY MODE) <<<\n")
 
 cycle = 0
-START = time.time()
 
 while True:
     # ===== Model A =====
@@ -104,8 +110,7 @@ while True:
     T_airA, H_airA = A_air.measure()
     T_watA, H_watA = A_wat.measure()
 
-    ALS_A = A_uv.read_als()
-    UV_A  = A_uv.read_uv()
+    UV_A = A_uv.read_uv()
 
     fullA, IR_A = A_lux.get_raw_luminosity()
     LUX_A = A_lux.calculate_lux(fullA, IR_A)
@@ -122,7 +127,6 @@ while True:
         "H_air": H_airA,
         "T_wat": T_watA,
         "H_wat": H_watA,
-        "ALS": ALS_A,
         "UV": UV_A,
         "LUX": LUX_A,
         "IR": IR_A,
@@ -133,8 +137,7 @@ while True:
     T_airB, H_airB = B_air.measure()
     T_watB, H_watB = B_wat.measure()
 
-    ALS_B = B_uv.read_als()
-    UV_B  = B_uv.read_uv()
+    UV_B = B_uv.read_uv()
 
     fullB, IR_B = B_lux.get_raw_luminosity()
     LUX_B = B_lux.calculate_lux(fullB, IR_B)
@@ -149,7 +152,6 @@ while True:
         "H_air": H_airB,
         "T_wat": T_watB,
         "H_wat": H_watB,
-        "ALS": ALS_B,
         "UV": UV_B,
         "LUX": LUX_B,
         "IR": IR_B,
@@ -160,8 +162,7 @@ while True:
     T_airC, H_airC = C_air.measure()
     T_watC, H_watC = C_wat.measure()
 
-    ALS_C = C_uv.read_als()
-    UV_C  = C_uv.read_uv()
+    UV_C = C_uv.read_uv()
 
     fullC, IR_C = C_lux.get_raw_luminosity()
     LUX_C = C_lux.calculate_lux(fullC, IR_C)
@@ -176,7 +177,6 @@ while True:
         "H_air": H_airC,
         "T_wat": T_watC,
         "H_wat": H_watC,
-        "ALS": ALS_C,
         "UV": UV_C,
         "LUX": LUX_C,
         "IR": IR_C,
@@ -186,7 +186,7 @@ while True:
     # ===== Model D (Wind) =====
     pulses = wind_pulses
     wind_pulses = 0
-    WIND = pulses * 0.4   # معاملك التجريبي
+    WIND = pulses * 0.4
 
     dataD = {"WIND_m_s": WIND}
 
