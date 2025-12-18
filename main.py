@@ -1,31 +1,25 @@
 # ==================================================
-# main.py — Stable System A+B+C+D
-# ThingSpeak SAFE RATE (NO -202)
+# main.py — A + B + C + D
+# ThingSpeak SAFE MODE (NO RATE LIMIT)
 # ==================================================
 
 import time, gc
 from machine import Pin, SoftI2C, reset
 
-# ------------------
-# Libraries
-# ------------------
+# ---------------- LIBRARIES ----------------
 from lib.sht30_clean import SHT30
 from lib.vl53l0x_clean import VL53L0X
 from lib.ltr390_clean import LTR390
 from lib.tsl2591_fixed import TSL2591
 from lib.hx711_clean import HX711
 
-# ------------------
-# ThingSpeak API KEYS
-# ------------------
-API_A = "PUT_API_KEY_A"
-API_B = "PUT_API_KEY_B"
-API_C = "PUT_API_KEY_C"
-API_D = "PUT_API_KEY_D"
+# ---------------- THINGSPEAK KEYS ----------------
+API_A = "PUT_API_A_HERE"
+API_B = "PUT_API_B_HERE"
+API_C = "PUT_API_C_HERE"
+API_D = "PUT_API_D_HERE"
 
-# ------------------
-# I2C BUSES
-# ------------------
+# ---------------- I2C MAP ----------------
 # Model A
 i2cA = SoftI2C(sda=Pin(19), scl=Pin(18))
 # Model B
@@ -35,9 +29,7 @@ i2cC = SoftI2C(sda=Pin(32), scl=Pin(14))
 # Model D
 i2cD = SoftI2C(sda=Pin(15), scl=Pin(2))
 
-# ------------------
-# Sensors Init
-# ------------------
+# ---------------- SENSORS ----------------
 # A
 A_air = SHT30(i2cA, 0x45)
 A_wat = SHT30(i2cA, 0x44)
@@ -58,7 +50,11 @@ C_dist = VL53L0X(i2cC)
 D_uv = LTR390(i2cD)
 D_lux = TSL2591(i2cD)
 
-# Wind
+# ---------------- HX711 CALIB ----------------
+hxA.tare()
+hxA.scale = 395.6   # ضع رقمك النهائي هنا
+
+# ---------------- WIND ----------------
 wind_pulses = 0
 wind_pin = Pin(13, Pin.IN)
 
@@ -68,9 +64,7 @@ def wind_irq(pin):
 
 wind_pin.irq(trigger=Pin.IRQ_RISING, handler=wind_irq)
 
-# ------------------
-# ThingSpeak Sender
-# ------------------
+# ---------------- TS SEND ----------------
 def send_ts(api, data):
     try:
         import urequests
@@ -80,67 +74,76 @@ def send_ts(api, data):
             url += "&field{}={}".format(i, v)
             i += 1
         r = urequests.get(url)
+        print("TS status:", r.status_code)
         r.close()
     except Exception as e:
         print("TS error:", e)
 
-# ------------------
-# MAIN LOOP
-# ------------------
-print("\n=== SYSTEM RUNNING (STABLE) ===\n")
+print("\n=== SYSTEM RUNNING (SAFE TS MODE) ===\n")
 
-cycle = 0
-
+# ================= MAIN LOOP =================
 while True:
 
-    # ===== MODEL A =====
+    # ---------- READ A ----------
     Ta, _ = A_air.measure()
-    Tw, _ = A_wat.measure()
+    Twa, _ = A_wat.measure()
     try:
         Da = A_dist.read()
     except:
-        Da = 0
+        Da = None
     Wa = hxA.get_weight()
 
     dataA = {
-        "T_air": Ta,
-        "T_wat": Tw,
+        "T_air": round(Ta,2),
+        "T_wat": round(Twa,2),
         "Dist": Da,
-        "Weight": Wa
+        "Weight": round(Wa,1)
     }
 
-    # ===== MODEL B =====
+    print("A:", dataA)
+    send_ts(API_A, dataA)
+    time.sleep(20)   # <<< تأخير حقيقي
+
+    # ---------- READ B ----------
     Tb, _ = B_air.measure()
     Twb, _ = B_wat.measure()
     try:
         Db = B_dist.read()
     except:
-        Db = 0
+        Db = None
 
     dataB = {
-        "T_air": Tb,
-        "T_wat": Twb,
+        "T_air": round(Tb,2),
+        "T_wat": round(Twb,2),
         "Dist": Db
     }
 
-    # ===== MODEL C =====
+    print("B:", dataB)
+    send_ts(API_B, dataB)
+    time.sleep(20)
+
+    # ---------- READ C ----------
     Tc, _ = C_air.measure()
     Twc, _ = C_wat.measure()
     try:
         Dc = C_dist.read()
     except:
-        Dc = 0
+        Dc = None
 
     dataC = {
-        "T_air": Tc,
-        "T_wat": Twc,
+        "T_air": round(Tc,2),
+        "T_wat": round(Twc,2),
         "Dist": Dc
     }
 
-    # ===== MODEL D =====
+    print("C:", dataC)
+    send_ts(API_C, dataC)
+    time.sleep(20)
+
+    # ---------- READ D ----------
     UV = D_uv.read_uv()
-    full, IR = D_lux.get_raw_luminosity()
-    LUX = D_lux.calculate_lux(full, IR)
+    full, ir = D_lux.get_raw_luminosity()
+    LUX = D_lux.calculate_lux(full, ir)
 
     pulses = wind_pulses
     wind_pulses = 0
@@ -148,35 +151,14 @@ while True:
 
     dataD = {
         "UV": UV,
-        "IR": IR,
-        "LUX": LUX,
-        "WIND": WIND
+        "IR": ir,
+        "LUX": round(LUX,1),
+        "WIND": round(WIND,2)
     }
 
-    # ----- PRINT -----
-    print("-" * 60)
-    print("A | T_air:", round(Ta,2), "T_wat:", round(Tw,2), "Dist:", Da, "Weight:", round(Wa,1))
-    print("B | T_air:", round(Tb,2), "T_wat:", round(Twb,2), "Dist:", Db)
-    print("C | T_air:", round(Tc,2), "T_wat:", round(Twc,2), "Dist:", Dc)
-    print("D | UV:", UV, "IR:", IR, "LUX:", round(LUX,1), "WIND:", WIND)
-
-    # ----- SEND WITH SAFE DELAY -----
-    send_ts(API_A, dataA)
-    time.sleep(16)
-
-    send_ts(API_B, dataB)
-    time.sleep(16)
-
-    send_ts(API_C, dataC)
-    time.sleep(16)
-
+    print("D:", dataD)
     send_ts(API_D, dataD)
-    time.sleep(16)
+    time.sleep(20)
 
-    cycle += 1
-    if cycle >= 15:
-        print("Auto reset for OTA...")
-        time.sleep(2)
-        reset()
-
+    print("-"*60)
     gc.collect()
