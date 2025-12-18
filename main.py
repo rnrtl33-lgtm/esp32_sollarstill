@@ -14,10 +14,10 @@ from lib.tsl2591_fixed import TSL2591
 from lib.hx711_clean import HX711
 
 # ---------------- THINGSPEAK KEYS ----------------
-API_A = "PUT_API_A_HERE"
-API_B = "PUT_API_B_HERE"
-API_C = "PUT_API_C_HERE"
-API_D = "PUT_API_D_HERE"
+API_A = "EU6EE36IJ7WSVYP3"
+API_B = "E8CTAK8MCUWLVQJ2"
+API_C = "Y1FWSOX7Z6YZ8QMU"
+API_D = "HG8GG8DF40LCGV99"
 
 # ---------------- I2C MAP ----------------
 # Model A
