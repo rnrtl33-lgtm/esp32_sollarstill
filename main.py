@@ -13,7 +13,7 @@ from machine import Pin, SoftI2C, reset
 from lib.sht30_clean import SHT30
 from lib.vl53l0x_clean import VL53L0X
 from lib.tsl2591_fixed import TSL2591
-from lib.ltr390_fixed import LTR390
+from lib.ltr390_clean import LTR390
 from lib.hx711_clean import HX711
 
 # -----------------------
