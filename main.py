@@ -1,71 +1,64 @@
-# =====================================================
-# main.py — FINAL STABLE SYSTEM (A+B+C+D)
-# Weight only on Model A
-# ThingSpeak + OTA reset-cycle
-# =====================================================
+# ==================================================
+# main.py — Stable System A+B+C+D
+# ThingSpeak SAFE RATE (NO -202)
+# ==================================================
 
 import time, gc
 from machine import Pin, SoftI2C, reset
 
-# -----------------------
+# ------------------
 # Libraries
-# -----------------------
+# ------------------
 from lib.sht30_clean import SHT30
 from lib.vl53l0x_clean import VL53L0X
-from lib.tsl2591_fixed import TSL2591
 from lib.ltr390_clean import LTR390
+from lib.tsl2591_fixed import TSL2591
 from lib.hx711_clean import HX711
 
-# -----------------------
+# ------------------
 # ThingSpeak API KEYS
-# -----------------------
-API_A = "EU6EE36IJ7WSVYP3"
-API_B = "E8CTAK8MCUWLVQJ2"
-API_C = "Y1FWSOX7Z6YZ8QMU"
-API_D = "HG8G8BDF40LCGV99"
+# ------------------
+API_A = "PUT_API_KEY_A"
+API_B = "PUT_API_KEY_B"
+API_C = "PUT_API_KEY_C"
+API_D = "PUT_API_KEY_D"
 
-SEND_INTERVAL = 20      # ThingSpeak limit
-AUTO_RESET_SEC = 300    # 5 minutes
-
-# -----------------------
+# ------------------
 # I2C BUSES
-# -----------------------
+# ------------------
+# Model A
 i2cA = SoftI2C(sda=Pin(19), scl=Pin(18))
+# Model B
 i2cB = SoftI2C(sda=Pin(25), scl=Pin(26))
+# Model C
 i2cC = SoftI2C(sda=Pin(32), scl=Pin(14))
+# Model D
 i2cD = SoftI2C(sda=Pin(15), scl=Pin(2))
 
-# -----------------------
-# MODEL A
-# -----------------------
+# ------------------
+# Sensors Init
+# ------------------
+# A
 A_air = SHT30(i2cA, 0x45)
 A_wat = SHT30(i2cA, 0x44)
 A_dist = VL53L0X(i2cA)
+hxA = HX711(34, 33)
 
-hx = HX711(dt=34, sck=33)
-hx.offset = -89279.512   # من معايرتك
-hx.scale  = 395.6556
-
-# -----------------------
-# MODEL B
-# -----------------------
+# B
 B_air = SHT30(i2cB, 0x45)
 B_wat = SHT30(i2cB, 0x44)
 B_dist = VL53L0X(i2cB)
 
-# -----------------------
-# MODEL C
-# -----------------------
+# C
 C_air = SHT30(i2cC, 0x45)
 C_wat = SHT30(i2cC, 0x44)
 C_dist = VL53L0X(i2cC)
 
-# -----------------------
-# MODEL D
-# -----------------------
-uv_d = LTR390(i2cD)
-tsl_d = TSL2591(i2cD)
+# D
+D_uv = LTR390(i2cD)
+D_lux = TSL2591(i2cD)
 
+# Wind
 wind_pulses = 0
 wind_pin = Pin(13, Pin.IN)
 
@@ -75,40 +68,48 @@ def wind_irq(pin):
 
 wind_pin.irq(trigger=Pin.IRQ_RISING, handler=wind_irq)
 
-# -----------------------
-# ThingSpeak sender
-# -----------------------
+# ------------------
+# ThingSpeak Sender
+# ------------------
 def send_ts(api, data):
     try:
-        url = "https://api.thingspeak.com/update?api_key=" + api
-        for field, value in data.items():
-            url += "&field{}={}".format(field, value)
         import urequests
+        url = "https://api.thingspeak.com/update?api_key=" + api
+        i = 1
+        for v in data.values():
+            url += "&field{}={}".format(i, v)
+            i += 1
         r = urequests.get(url)
         r.close()
     except Exception as e:
         print("TS error:", e)
 
-# -----------------------
+# ------------------
 # MAIN LOOP
-# -----------------------
+# ------------------
 print("\n=== SYSTEM RUNNING (STABLE) ===\n")
-start_time = time.time()
+
+cycle = 0
 
 while True:
-    # -------- A --------
+
+    # ===== MODEL A =====
     Ta, _ = A_air.measure()
     Tw, _ = A_wat.measure()
     try:
         Da = A_dist.read()
     except:
         Da = 0
+    Wa = hxA.get_weight()
 
-    Wa = hx.get_weight()
-    if abs(Wa) < 2:
-        Wa = 0
+    dataA = {
+        "T_air": Ta,
+        "T_wat": Tw,
+        "Dist": Da,
+        "Weight": Wa
+    }
 
-    # -------- B --------
+    # ===== MODEL B =====
     Tb, _ = B_air.measure()
     Twb, _ = B_wat.measure()
     try:
@@ -116,7 +117,13 @@ while True:
     except:
         Db = 0
 
-    # -------- C --------
+    dataB = {
+        "T_air": Tb,
+        "T_wat": Twb,
+        "Dist": Db
+    }
+
+    # ===== MODEL C =====
     Tc, _ = C_air.measure()
     Twc, _ = C_wat.measure()
     try:
@@ -124,33 +131,52 @@ while True:
     except:
         Dc = 0
 
-    # -------- D --------
-    UV = uv_d.read_uv()
-    full, IR = tsl_d.get_raw_luminosity()
-    LUX = tsl_d.calculate_lux(full, IR)
+    dataC = {
+        "T_air": Tc,
+        "T_wat": Twc,
+        "Dist": Dc
+    }
+
+    # ===== MODEL D =====
+    UV = D_uv.read_uv()
+    full, IR = D_lux.get_raw_luminosity()
+    LUX = D_lux.calculate_lux(full, IR)
 
     pulses = wind_pulses
     wind_pulses = 0
     WIND = pulses * 0.4
 
-    # -------- PRINT --------
-    print("-"*60)
-    print("A | T_air:", Ta, "T_wat:", Tw, "Dist:", Da, "Weight:", round(Wa,1))
-    print("B | T_air:", Tb, "T_wat:", Twb, "Dist:", Db)
-    print("C | T_air:", Tc, "T_wat:", Twc, "Dist:", Dc)
-    print("D | UV:", UV, "IR:", IR, "LUX:", LUX, "WIND:", WIND)
+    dataD = {
+        "UV": UV,
+        "IR": IR,
+        "LUX": LUX,
+        "WIND": WIND
+    }
 
-    # -------- SEND --------
-    send_ts(API_A, {1: Ta, 2: Tw, 3: Da, 4: Wa})
-    send_ts(API_B, {1: Tb, 2: Twb, 3: Db})
-    send_ts(API_C, {1: Tc, 2: Twc, 3: Dc})
-    send_ts(API_D, {1: WIND, 2: UV, 3: LUX, 4: IR})
+    # ----- PRINT -----
+    print("-" * 60)
+    print("A | T_air:", round(Ta,2), "T_wat:", round(Tw,2), "Dist:", Da, "Weight:", round(Wa,1))
+    print("B | T_air:", round(Tb,2), "T_wat:", round(Twb,2), "Dist:", Db)
+    print("C | T_air:", round(Tc,2), "T_wat:", round(Twc,2), "Dist:", Dc)
+    print("D | UV:", UV, "IR:", IR, "LUX:", round(LUX,1), "WIND:", WIND)
 
-    # -------- AUTO RESET --------
-    if time.time() - start_time > AUTO_RESET_SEC:
+    # ----- SEND WITH SAFE DELAY -----
+    send_ts(API_A, dataA)
+    time.sleep(16)
+
+    send_ts(API_B, dataB)
+    time.sleep(16)
+
+    send_ts(API_C, dataC)
+    time.sleep(16)
+
+    send_ts(API_D, dataD)
+    time.sleep(16)
+
+    cycle += 1
+    if cycle >= 15:
         print("Auto reset for OTA...")
         time.sleep(2)
         reset()
 
     gc.collect()
-    time.sleep(SEND_INTERVAL)
