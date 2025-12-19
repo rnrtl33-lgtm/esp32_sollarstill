@@ -81,6 +81,6 @@ while True:
     lux = D_lux.calculate_lux(full, ir)
     print("D:", UV, ir, lux)
     send_ts(API_D, UV, ir, round(lux,1))
-    time.sleep(20)
+    time.sleep(300)
 
     gc.collect()
