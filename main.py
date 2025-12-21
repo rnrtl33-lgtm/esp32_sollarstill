@@ -19,7 +19,6 @@ def send_ts(api, f1, f2, f3=None, f4=None):
     r = urequests.get(url)
     print("TS:", r.status_code)
     r.close()
-    time.sleep(2)
 
 # ---------- I2C ----------
 i2cA = SoftI2C(sda=Pin(19), scl=Pin(18))
@@ -31,100 +30,96 @@ from lib.sht30_clean import SHT30
 from lib.vl53l0x_clean import VL53L0X
 from lib.ltr390_clean import LTR390
 from lib.tsl2591_fixed import TSL2591
-
-# ---------- Sensors ----------
-A_air  = SHT30(i2cA, 0x45)
-A_wat  = SHT30(i2cA, 0x44)
-A_dist = VL53L0X(i2cA)
-
-B_air  = SHT30(i2cB, 0x45)
-B_wat  = SHT30(i2cB, 0x44)
-B_dist = VL53L0X(i2cB)
-
-C_air  = SHT30(i2cC, 0x45)
-C_wat  = SHT30(i2cC, 0x44)
-C_dist = VL53L0X(i2cC)
-
-D_uv   = LTR390(i2cD)
-D_lux  = TSL2591(i2cD)
-
-# ---------- HX711 (Weight – Model A only) ----------
 from hx711_clean import HX711
 
+# ---------- Sensors ----------
+A_air, A_wat, A_dist = SHT30(i2cA,0x45), SHT30(i2cA,0x44), VL53L0X(i2cA)
+B_air, B_wat, B_dist = SHT30(i2cB,0x45), SHT30(i2cB,0x44), VL53L0X(i2cB)
+C_air, C_wat, C_dist = SHT30(i2cC,0x45), SHT30(i2cC,0x44), VL53L0X(i2cC)
+D_uv, D_lux = LTR390(i2cD), TSL2591(i2cD)
+
+# ---------- HX711 (Model A) ----------
 hx = HX711(dt=34, sck=33)
-hx.scale = 778.7703      # المعايرة المعتمدة
+hx.scale = 778.7703
 hx.tare(samples=60)
 
-LAST_WEIGHT = 0.0
-WEIGHT_DELTA = 15.0      # أقل تغير يُعتبر حقيقي (غرام)
+# ---------- Weight Processing ----------
+EMA_ALPHA = 0.2        # نعومة القراءة
+WEIGHT_DELTA = 15.0    # تغير حقيقي
+weight_ema = 0.0
+last_sent_weight = 0.0
 
-def read_weight(samples=20):
+def read_weight_raw(samples=15):
     vals = []
     for _ in range(samples):
         vals.append(hx.read())
-        time.sleep(0.01)
-
-    # حذف القيم الشاذة البسيطة
+        time.sleep(0.005)
     vals.sort()
-    if len(vals) > 4:
-        vals = vals[1:-1]
-
+    vals = vals[2:-2] if len(vals) > 6 else vals
     avg = sum(vals) / len(vals)
     return (avg - hx.offset) / hx.scale
 
+# ---------- Timers ----------
+t_weight = time.ticks_ms()
+t_A = time.ticks_ms()
+t_B = time.ticks_ms()
+t_C = time.ticks_ms()
+t_D = time.ticks_ms()
 
-print("=== MAIN RUNNING ===")
+print("=== MAIN RUNNING (IMPROVED) ===")
 
 while True:
-    # ===== WEIGHT (A only) =====
-    W = read_weight()
+    now = time.ticks_ms()
 
-    if abs(W - LAST_WEIGHT) >= WEIGHT_DELTA:
-        print("W(A): {:.1f} g".format(W))
-        LAST_WEIGHT = W
-    else:
-        print("W(A): {:.1f} g (stable)".format(W))
+    # ===== Weight (every 2s) =====
+    if time.ticks_diff(now, t_weight) > 2000:
+        w = read_weight_raw()
+        weight_ema = (EMA_ALPHA * w) + (1 - EMA_ALPHA) * weight_ema
 
-    # ----- A -----
-    Ta,_  = A_air.measure()
-    Twa,_ = A_wat.measure()
-    Da    = A_dist.read()
+        if abs(weight_ema - last_sent_weight) >= WEIGHT_DELTA:
+            print("W(A): {:.1f} g (changed)".format(weight_ema))
+            last_sent_weight = weight_ema
+        else:
+            print("W(A): {:.1f} g".format(weight_ema))
 
-    print("A:", round(Ta,2), round(Twa,2), Da, "W:", round(W,1))
-    send_ts(
-        API_A,
-        round(Ta,2),     # field1: Air Temp
-        round(Twa,2),    # field2: Water Temp
-        Da,              # field3: Distance
-        round(W,1)       # field4: Weight (g)
-    )
-    time.sleep(20)
+        t_weight = now
 
-    # ----- B -----
-    Tb,_  = B_air.measure()
-    Twb,_ = B_wat.measure()
-    Db    = B_dist.read()
+    # ===== A (every 20s) =====
+    if time.ticks_diff(now, t_A) > 20000:
+        Ta,_ = A_air.measure()
+        Twa,_ = A_wat.measure()
+        Da = A_dist.read()
 
-    print("B:", round(Tb,2), round(Twb,2), Db)
-    send_ts(API_B, round(Tb,2), round(Twb,2), Db)
-    time.sleep(20)
+        print("A:", round(Ta,2), round(Twa,2), Da, "W:", round(weight_ema,1))
+        send_ts(API_A, round(Ta,2), round(Twa,2), Da, round(weight_ema,1))
+        t_A = now
 
-    # ----- C -----
-    Tc,_  = C_air.measure()
-    Twc,_ = C_wat.measure()
-    Dc    = C_dist.read()
+    # ===== B (every 20s) =====
+    if time.ticks_diff(now, t_B) > 20000:
+        Tb,_ = B_air.measure()
+        Twb,_ = B_wat.measure()
+        Db = B_dist.read()
+        print("B:", round(Tb,2), round(Twb,2), Db)
+        send_ts(API_B, round(Tb,2), round(Twb,2), Db)
+        t_B = now
 
-    print("C:", round(Tc,2), round(Twc,2), Dc)
-    send_ts(API_C, round(Tc,2), round(Twc,2), Dc)
-    time.sleep(20)
+    # ===== C (every 20s) =====
+    if time.ticks_diff(now, t_C) > 20000:
+        Tc,_ = C_air.measure()
+        Twc,_ = C_wat.measure()
+        Dc = C_dist.read()
+        print("C:", round(Tc,2), round(Twc,2), Dc)
+        send_ts(API_C, round(Tc,2), round(Twc,2), Dc)
+        t_C = now
 
-    # ----- D -----
-    UV = D_uv.read_uv()
-    full, ir = D_lux.get_raw_luminosity()
-    lux = D_lux.calculate_lux(full, ir)
-
-    print("D:", UV, ir, round(lux,1))
-    send_ts(API_D, UV, ir, round(lux,1))
-    time.sleep(300)
+    # ===== D (every 5 min) =====
+    if time.ticks_diff(now, t_D) > 300000:
+        UV = D_uv.read_uv()
+        full, ir = D_lux.get_raw_luminosity()
+        lux = D_lux.calculate_lux(full, ir)
+        print("D:", UV, ir, round(lux,1))
+        send_ts(API_D, UV, ir, round(lux,1))
+        t_D = now
 
     gc.collect()
+
