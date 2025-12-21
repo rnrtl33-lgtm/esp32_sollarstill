@@ -73,8 +73,8 @@ hxB.scale = 447.3984      # B → unchanged
 hxC.scale = 778.7703    # C → 1 kg
 
 hxA.tare(samples=60)
-hxB.tare(samples=80)
-hxC.tare(samples=60)
+hxB.tare(samples=60)
+hxC.tare(samples=80)
 
 # ---------------- VL53L0X CALIBRATION ----------------
 K_VL53 = 0.66   # معامل التصحيح المعتمد
