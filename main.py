@@ -63,7 +63,7 @@ D_lux = TSL2591(i2cD)
 # ---------------- HX711 ----------------
 hxA = HX711(dt=34, sck=33)
 hxB = HX711(dt=35, sck=33)
-hxC = HX711(dt=36, sck=33)
+hxC = HX711(dt=36, sck=16)
 
 # ---------------- WEIGHT CALIBRATION ----------------
 
