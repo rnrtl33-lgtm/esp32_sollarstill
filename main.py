@@ -1,66 +1,92 @@
-# ================= main.py =================
-import time, gc
+# ==================================================
+# main.py — Models A + B + C + D
+# ThingSpeak ONLY + Hourly Reset
+# ==================================================
+
+import time, gc, machine
 from machine import Pin, SoftI2C
 import urequests
-from hx711_clean import HX711
 
-# ---------- ThingSpeak ----------
+# ---------------- ThingSpeak WRITE KEYS ----------------
 API_A = "EU6EE36IJ7WSVYP3"
 API_B = "E8CTAK8MCUWLVQJ2"
 API_C = "Y1FWSOX7Z6YZ8QMU"
 API_D = "HG8GG8DF40LCGV99"
 
+# ---------------- ThingSpeak SEND ----------------
 def send_ts(api, f1, f2=None, f3=None, f4=None):
-    url = "http://api.thingspeak.com/update?api_key={}&field1={}".format(api, f1)
-    if f2 is not None: url += "&field2={}".format(f2)
-    if f3 is not None: url += "&field3={}".format(f3)
-    if f4 is not None: url += "&field4={}".format(f4)
-    r = urequests.get(url)
-    print("TS:", r.status_code)
-    r.close()
+    url = "https://api.thingspeak.com/update?api_key={}&field1={}".format(api, f1)
+    if f2 is not None:
+        url += "&field2={}".format(f2)
+    if f3 is not None:
+        url += "&field3={}".format(f3)
+    if f4 is not None:
+        url += "&field4={}".format(f4)
 
-# ---------- I2C ----------
+    try:
+        r = urequests.get(url)
+        print("TS:", r.status_code, r.text)
+        r.close()
+    except Exception as e:
+        print("TS ERROR:", e)
+
+# ---------------- I2C MAP ----------------
 i2cA = SoftI2C(sda=Pin(19), scl=Pin(18))
 i2cB = SoftI2C(sda=Pin(25), scl=Pin(26))
 i2cC = SoftI2C(sda=Pin(32), scl=Pin(14))
 i2cD = SoftI2C(sda=Pin(15), scl=Pin(2))
 
+# ---------------- LIBRARIES ----------------
 from lib.sht30_clean import SHT30
 from lib.vl53l0x_clean import VL53L0X
 from lib.ltr390_clean import LTR390
 from lib.tsl2591_fixed import TSL2591
+from lib.hx711_clean import HX711
 
-# ---------- Sensors ----------
-A_air, A_wat, A_dist = SHT30(i2cA,0x45), SHT30(i2cA,0x44), VL53L0X(i2cA)
-B_air, B_wat, B_dist = SHT30(i2cB,0x45), SHT30(i2cB,0x44), VL53L0X(i2cB)
-C_air, C_wat, C_dist = SHT30(i2cC,0x45), SHT30(i2cC,0x44), VL53L0X(i2cC)
-D_uv, D_lux = LTR390(i2cD), TSL2591(i2cD)
+# ---------------- SENSORS ----------------
+# Model A
+A_air  = SHT30(i2cA, 0x45)
+A_wat  = SHT30(i2cA, 0x44)
+A_dist = VL53L0X(i2cA)
 
-# =========================================================
-# ===================== HX711 =============================
-# =========================================================
+# Model B
+B_air  = SHT30(i2cB, 0x45)
+B_wat  = SHT30(i2cB, 0x44)
+B_dist = VL53L0X(i2cB)
 
-# ---------- Model A (1kg) ----------
-hxA = HX711(dt=34, sck=33)
-hxA.scale = 778.7703
+# Model C
+C_air  = SHT30(i2cC, 0x45)
+C_wat  = SHT30(i2cC, 0x44)
+C_dist = VL53L0X(i2cC)
+
+# Model D
+D_uv  = LTR390(i2cD)
+D_lux = TSL2591(i2cD)
+
+# ---------------- HX711 ----------------
+hxA = HX711(dt=34, sck=33)   # Model A
+hxB = HX711(dt=35, sck=33)   # Model B
+hxC = HX711(dt=36, sck=33)   # Model C
+
+# ---------------- CALIBRATION ----------------
+# A = 5 kg
+# C = 1 kg
+# B = unchanged
+
+SCALE_1KG = 778.7703
+SCALE_5KG = 3893.85
+
+hxA.scale = SCALE_5KG     # A → 5 kg
+hxC.scale = SCALE_1KG     # C → 1 kg
+hxB.scale = 447.3984      # B → كما هو
+
 hxA.tare(samples=60)
-
-# ---------- Model B (5kg) ----------
-hxB = HX711(dt=35, sck=32)
-hxB.scale = 447.3984
 hxB.tare(samples=80)
+hxC.tare(samples=60)
 
-# ---------- Model C (5kg) ----------
-hxC = HX711(dt=36, sck=25)
-hxC.scale = 447.3984
-hxC.tare(samples=80)
-
+# ---------------- WEIGHT FILTER ----------------
 EMA_ALPHA = 0.2
-DELTA_A = 15.0
-DELTA_BC = 20.0
-
-wA_ema = wB_ema = wC_ema = 0.0
-lastA = lastB = lastC = 0.0
+wA = wB = wC = 0.0
 
 def read_weight(hx, samples=15):
     vals = []
@@ -68,77 +94,67 @@ def read_weight(hx, samples=15):
         vals.append(hx.read())
         time.sleep(0.005)
     vals.sort()
-    if len(vals) > 6:
-        vals = vals[2:-2]
+    vals = vals[2:-2]
     avg = sum(vals) / len(vals)
     return (avg - hx.offset) / hx.scale
 
-# ---------- Timers ----------
-tW = tA = tB = tC = tD = time.ticks_ms()
+# ---------------- TIMERS ----------------
+tA = tB = tC = tD = tW = time.ticks_ms()
 
-print("=== MAIN RUNNING (A+B+C WEIGHT ENABLED) ===")
+# ---------------- HOURLY RESET ----------------
+START_TIME = time.ticks_ms()
+ONE_HOUR = 60 * 60 * 1000
 
+print("=== MAIN RUNNING (FINAL) ===")
+
+# ================= MAIN LOOP =================
 while True:
     now = time.ticks_ms()
 
-    # ===== Weight update (2s) =====
+    # ---- Weight update (2s) ----
     if time.ticks_diff(now, tW) > 2000:
-        wA = read_weight(hxA)
-        wB = read_weight(hxB)
-        wC = read_weight(hxC)
-
-        wA_ema = EMA_ALPHA * wA + (1-EMA_ALPHA) * wA_ema
-        wB_ema = EMA_ALPHA * wB + (1-EMA_ALPHA) * wB_ema
-        wC_ema = EMA_ALPHA * wC + (1-EMA_ALPHA) * wC_ema
-
-        if abs(wA_ema - lastA) > DELTA_A:
-            print("W(A): {:.1f} g".format(wA_ema))
-            lastA = wA_ema
-
-        if abs(wB_ema - lastB) > DELTA_BC:
-            print("W(B): {:.1f} g".format(wB_ema))
-            lastB = wB_ema
-
-        if abs(wC_ema - lastC) > DELTA_BC:
-            print("W(C): {:.1f} g".format(wC_ema))
-            lastC = wC_ema
-
+        wA = EMA_ALPHA * read_weight(hxA) + (1 - EMA_ALPHA) * wA
+        wB = EMA_ALPHA * read_weight(hxB) + (1 - EMA_ALPHA) * wB
+        wC = EMA_ALPHA * read_weight(hxC) + (1 - EMA_ALPHA) * wC
         tW = now
 
-    # ===== A (20s) =====
+    # ---- Model A (20s) ----
     if time.ticks_diff(now, tA) > 20000:
-        Ta,_ = A_air.measure()
-        Twa,_ = A_wat.measure()
+        Ta, _  = A_air.measure()
+        Twa, _ = A_wat.measure()
         Da = A_dist.read()
-
-        send_ts(API_A, round(Ta,2), round(Twa,2), Da, round(wA_ema,1))
+        send_ts(API_A, round(Ta,2), round(Twa,2), Da, round(wA,2))
         tA = now
 
-    # ===== B (20s) =====
+    # ---- Model B (20s) ----
     if time.ticks_diff(now, tB) > 20000:
-        Tb,_ = B_air.measure()
-        Twb,_ = B_wat.measure()
+        Tb, _  = B_air.measure()
+        Twb, _ = B_wat.measure()
         Db = B_dist.read()
-
-        send_ts(API_B, round(Tb,2), round(Twb,2), Db, round(wB_ema,1))
+        send_ts(API_B, round(Tb,2), round(Twb,2), Db, round(wB,2))
         tB = now
 
-    # ===== C (20s) =====
+    # ---- Model C (20s) ----
     if time.ticks_diff(now, tC) > 20000:
-        Tc,_ = C_air.measure()
-        Twc,_ = C_wat.measure()
+        Tc, _  = C_air.measure()
+        Twc, _ = C_wat.measure()
         Dc = C_dist.read()
-
-        send_ts(API_C, round(Tc,2), round(Twc,2), Dc, round(wC_ema,1))
+        send_ts(API_C, round(Tc,2), round(Twc,2), Dc, round(wC,2))
         tC = now
 
-    # ===== D (5 min) =====
+    # ---- Model D (5 min) ----
     if time.ticks_diff(now, tD) > 300000:
         UV = D_uv.read_uv()
         full, ir = D_lux.get_raw_luminosity()
         lux = D_lux.calculate_lux(full, ir)
-
         send_ts(API_D, UV, ir, round(lux,1))
         tD = now
 
+    # ---- Hourly reset ----
+    if time.ticks_diff(now, START_TIME) > ONE_HOUR:
+        print("Hourly reset")
+        time.sleep(2)
+        machine.reset()
+
     gc.collect()
+
