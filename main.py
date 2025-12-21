@@ -73,11 +73,10 @@ hxC = HX711(dt=36, sck=33)   # Model C
 # C = 1 kg
 # B = unchanged
 
-SCALE_1KG = 778.7703
-SCALE_5KG = 3893.85
 
-hxA.scale = SCALE_5KG     # A → 5 kg
-hxC.scale = SCALE_1KG     # C → 1 kg
+
+hxA.scale = 447.3984    # A → 5 kg
+hxC.scale = 778.7703    # C → 1 kg
 hxB.scale = 447.3984      # B → كما هو
 
 hxA.tare(samples=60)
