@@ -1,13 +1,13 @@
 # ==================================================
 # main.py — Models A + B + C + D
-# ThingSpeak ONLY + Hourly Reset
+# ThingSpeak + Weight + VL53 Calibration
 # ==================================================
 
 import time, gc, machine
 from machine import Pin, SoftI2C
 import urequests
 
-# ---------------- ThingSpeak WRITE KEYS ----------------
+# ---------------- ThingSpeak KEYS ----------------
 API_A = "EU6EE36IJ7WSVYP3"
 API_B = "E8CTAK8MCUWLVQJ2"
 API_C = "Y1FWSOX7Z6YZ8QMU"
@@ -16,12 +16,9 @@ API_D = "HG8GG8DF40LCGV99"
 # ---------------- ThingSpeak SEND ----------------
 def send_ts(api, f1, f2=None, f3=None, f4=None):
     url = "https://api.thingspeak.com/update?api_key={}&field1={}".format(api, f1)
-    if f2 is not None:
-        url += "&field2={}".format(f2)
-    if f3 is not None:
-        url += "&field3={}".format(f3)
-    if f4 is not None:
-        url += "&field4={}".format(f4)
+    if f2 is not None: url += "&field2={}".format(f2)
+    if f3 is not None: url += "&field3={}".format(f3)
+    if f4 is not None: url += "&field4={}".format(f4)
 
     try:
         r = urequests.get(url)
@@ -64,24 +61,29 @@ D_uv  = LTR390(i2cD)
 D_lux = TSL2591(i2cD)
 
 # ---------------- HX711 ----------------
-hxA = HX711(dt=34, sck=33)   # Model A
-hxB = HX711(dt=35, sck=33)   # Model B
-hxC = HX711(dt=36, sck=33)   # Model C
+hxA = HX711(dt=34, sck=33)
+hxB = HX711(dt=35, sck=33)
+hxC = HX711(dt=36, sck=33)
 
-# ---------------- CALIBRATION ----------------
-# A = 5 kg
-# C = 1 kg
-# B = unchanged
+# ---------------- WEIGHT CALIBRATION ----------------
 
 
-
-hxA.scale = 447.3984    # A → 5 kg
+hxA.scale = 447.3984     # A → 5 kg
+hxB.scale = 447.3984      # B → unchanged
 hxC.scale = 778.7703    # C → 1 kg
-hxB.scale = 447.3984      # B → كما هو
 
 hxA.tare(samples=60)
 hxB.tare(samples=80)
 hxC.tare(samples=60)
+
+# ---------------- VL53L0X CALIBRATION ----------------
+K_VL53 = 0.66   # معامل التصحيح المعتمد
+
+def read_distance_cm(vl):
+    d_mm = vl.read()
+    if d_mm is None:
+        return None
+    return round((d_mm / 10.0) * K_VL53, 2)
 
 # ---------------- WEIGHT FILTER ----------------
 EMA_ALPHA = 0.2
@@ -104,7 +106,7 @@ tA = tB = tC = tD = tW = time.ticks_ms()
 START_TIME = time.ticks_ms()
 ONE_HOUR = 60 * 60 * 1000
 
-print("=== MAIN RUNNING (FINAL) ===")
+print("=== MAIN RUNNING (FINAL + VL53 CAL) ===")
 
 # ================= MAIN LOOP =================
 while True:
@@ -119,25 +121,25 @@ while True:
 
     # ---- Model A (20s) ----
     if time.ticks_diff(now, tA) > 20000:
-        Ta, _  = A_air.measure()
-        Twa, _ = A_wat.measure()
-        Da = A_dist.read()
+        Ta,_  = A_air.measure()
+        Twa,_ = A_wat.measure()
+        Da = read_distance_cm(A_dist)
         send_ts(API_A, round(Ta,2), round(Twa,2), Da, round(wA,2))
         tA = now
 
     # ---- Model B (20s) ----
     if time.ticks_diff(now, tB) > 20000:
-        Tb, _  = B_air.measure()
-        Twb, _ = B_wat.measure()
-        Db = B_dist.read()
+        Tb,_  = B_air.measure()
+        Twb,_ = B_wat.measure()
+        Db = read_distance_cm(B_dist)
         send_ts(API_B, round(Tb,2), round(Twb,2), Db, round(wB,2))
         tB = now
 
     # ---- Model C (20s) ----
     if time.ticks_diff(now, tC) > 20000:
-        Tc, _  = C_air.measure()
-        Twc, _ = C_wat.measure()
-        Dc = C_dist.read()
+        Tc,_  = C_air.measure()
+        Twc,_ = C_wat.measure()
+        Dc = read_distance_cm(C_dist)
         send_ts(API_C, round(Tc,2), round(Twc,2), Dc, round(wC,2))
         tC = now
 
@@ -156,4 +158,3 @@ while True:
         machine.reset()
 
     gc.collect()
-
