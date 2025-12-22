@@ -1,15 +1,14 @@
 from machine import Pin
 import time
 
-relay = Pin(17, Pin.OUT)
+relay = Pin(17, Pin.OUT, value=1)  # HIGH = OFF (Active-LOW)
 
-relay.value(0)   # OFF مؤكد
-print("OFF")
+print("Pump OFF - ready for test")
 time.sleep(3)
 
-relay.value(1)   # ON
-print("ON")
-time.sleep(5)
+print("Pump ON")
+relay.value(0)    # تشغيل
+time.sleep(3)
 
-relay.value(0)   # OFF
-print("OFF")
+print("Pump OFF")
+relay.value(1)    # إيقاف
