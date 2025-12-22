@@ -18,8 +18,10 @@ def send_ts(api, f1, f2=None, f3=None, f4=None):
         r = urequests.get(url)
         print("TS:", r.status_code, r.text)
         r.close()
+        gc.collect()                      # <<< FIX 1
     except Exception as e:
         print("TS ERROR:", e)
+        gc.collect()                      # <<< FIX 1
 
 # ---------------- I2C MAP ----------------
 i2cA = SoftI2C(sda=Pin(19), scl=Pin(18))
@@ -47,9 +49,9 @@ hxA = HX711(dt=34, sck=33)
 hxB = HX711(dt=35, sck=33)
 hxC = HX711(dt=36, sck=16)
 
-hxA.scale = 447.3984      # A → 5 kg
+hxA.scale = 447.3984
 hxB.scale = 447.3984
-hxC.scale = 778.7703      # C → 1 kg
+hxC.scale = 778.7703
 
 hxA.tare(60)
 hxB.tare(60)
@@ -58,15 +60,24 @@ hxC.tare(60)
 # ---------------- VL53 CAL ----------------
 K_VL53 = 0.66
 def read_distance_cm(vl):
-    d = vl.read()
-    return None if d is None else round((d/10)*K_VL53,2)
+    try:                                 # <<< FIX 3
+        d = vl.read()
+        return None if d is None else round((d/10)*K_VL53,2)
+    except:
+        return None
 
 # ---------------- WEIGHT ----------------
 def read_weight(hx, n=15):
-    vals = [hx.read() for _ in range(n)]
-    vals.sort()
-    vals = vals[2:-2]
-    return (sum(vals)/len(vals) - hx.offset) / hx.scale
+    try:                                 # <<< FIX 3
+        vals = [hx.read() for _ in range(n)]
+        vals.sort()
+        vals = vals[2:-2]
+        w = (sum(vals)/len(vals) - hx.offset) / hx.scale
+        if abs(w) < 0.05:                # <<< FIX 4
+            hx.tare(30)
+        return w
+    except:
+        return None
 
 # ---------------- AVERAGING (5 MIN) ----------------
 A=B=C={"Ta":0,"Tw":0,"D":0,"W":0,"n":0}
@@ -75,57 +86,73 @@ Dsum={"wind":0,"UV":0,"LUX":0,"IR":0,"n":0}
 SEND_INTERVAL = 5*60*1000
 last_send = time.ticks_ms()
 
-print("=== MAIN RUNNING (FINAL / 5 MIN AVG) ===")
+# ---------------- RESET TIMER ----------------
+START_TIME = time.ticks_ms()             # <<< FIX 5
+RESET_INTERVAL = 6*60*60*1000             # 6 hours
+
+print("=== MAIN RUNNING (FINAL / STABLE) ===")
 
 # ================= MAIN LOOP =================
 while True:
-    # ----- Read A/B/C -----
+
     for S,air,wat,dist,hx in [
         (A,A_air,A_wat,A_dist,hxA),
         (B,B_air,B_wat,B_dist,hxB),
         (C,C_air,C_wat,C_dist,hxC)
     ]:
-        Ta,_ = air.measure()
-        Tw,_ = wat.measure()
-        Dm = read_distance_cm(dist)
-        W  = read_weight(hx)
+        try:
+            Ta,_ = air.measure()
+            Tw,_ = wat.measure()
+            Dm = read_distance_cm(dist)
+            W  = read_weight(hx)
 
-        S["Ta"]+=Ta; S["Tw"]+=Tw
-        S["D"] += Dm if Dm else 0
-        S["W"] += W
-        S["n"] += 1
+            if Ta is not None and Tw is not None:   # <<< FIX 2
+                S["Ta"]+=Ta; S["Tw"]+=Tw
+                if Dm is not None: S["D"]+=Dm
+                if W  is not None: S["W"]+=W
+                S["n"]+=1
+        except:
+            pass
 
-    # ----- Read D -----
-    UV = D_uv.read_uv()
-    full, ir = D_lux.get_raw_luminosity()
-    lux = D_lux.calculate_lux(full, ir)
+    try:
+        UV = D_uv.read_uv()
+        full, ir = D_lux.get_raw_luminosity()
+        lux = D_lux.calculate_lux(full, ir)
 
-    Dsum["wind"]+=0
-    Dsum["UV"]+=UV
-    Dsum["LUX"]+=lux
-    Dsum["IR"]+=ir
-    Dsum["n"]+=1
+        Dsum["wind"]+=0
+        Dsum["UV"]+=UV
+        Dsum["LUX"]+=lux
+        Dsum["IR"]+=ir
+        Dsum["n"]+=1
+    except:
+        pass
 
-    # ----- Send every 5 min -----
     if time.ticks_diff(time.ticks_ms(), last_send) > SEND_INTERVAL:
         for api,S in [(API_A,A),(API_B,B),(API_C,C)]:
-            send_ts(api,
-                round(S["Ta"]/S["n"],2),
-                round(S["Tw"]/S["n"],2),
-                round(S["D"]/S["n"],2),
-                round(S["W"]/S["n"],2)
-            )
+            if S["n"] > 0:
+                send_ts(api,
+                    round(S["Ta"]/S["n"],2),
+                    round(S["Tw"]/S["n"],2),
+                    round(S["D"]/S["n"],2),
+                    round(S["W"]/S["n"],2)
+                )
             S.update({"Ta":0,"Tw":0,"D":0,"W":0,"n":0})
 
-        send_ts(API_D,
-            round(Dsum["wind"]/Dsum["n"],2),
-            round(Dsum["UV"]/Dsum["n"],2),
-            round(Dsum["LUX"]/Dsum["n"],2),
-            round(Dsum["IR"]/Dsum["n"],2)
-        )
+        if Dsum["n"] > 0:
+            send_ts(API_D,
+                round(Dsum["wind"]/Dsum["n"],2),
+                round(Dsum["UV"]/Dsum["n"],2),
+                round(Dsum["LUX"]/Dsum["n"],2),
+                round(Dsum["IR"]/Dsum["n"],2)
+            )
         Dsum.update({"wind":0,"UV":0,"LUX":0,"IR":0,"n":0})
 
         last_send = time.ticks_ms()
+
+    if time.ticks_diff(time.ticks_ms(), START_TIME) > RESET_INTERVAL:   # <<< FIX 5
+        print("SAFE RESET")
+        time.sleep(2)
+        machine.reset()
 
     gc.collect()
     time.sleep(5)
