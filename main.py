@@ -80,7 +80,10 @@ def read_weight(hx, n=15):
         return None
 
 # ---------------- AVERAGING (5 MIN) ----------------
-A=B=C={"Ta":0,"Tw":0,"D":0,"W":0,"n":0}
+A = {"Ta":0,"Tw":0,"D":0,"W":0,"n":0}
+B = {"Ta":0,"Tw":0,"D":0,"W":0,"n":0}
+C = {"Ta":0,"Tw":0,"D":0,"W":0,"n":0}
+
 Dsum={"wind":0,"UV":0,"LUX":0,"IR":0,"n":0}
 
 SEND_INTERVAL = 5*60*1000
