@@ -44,8 +44,8 @@ D_lux = TSL2591(i2cD)
 
 # ---------------- HX711 ----------------
 hxA = HX711(dt=34, sck=33)
-hxB = HX711(dt=35, sck=32)
-hxC = HX711(dt=36, sck=25)
+hxB = HX711(dt=35, sck=33)
+hxC = HX711(dt=36, sck=16)
 
 hxA.scale = 447.3984      # A → 5 kg
 hxB.scale = 447.3984
