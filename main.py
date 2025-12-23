@@ -29,7 +29,6 @@ def ota_check():
     global OTA_DONE
     if OTA_DONE:
         return
-
     try:
         print("OTA: Checking...")
         r = urequests.get(GITHUB_RAW_URL)
@@ -50,7 +49,6 @@ def ota_check():
             machine.reset()
         else:
             print("OTA: No update")
-
     except Exception as e:
         print("OTA ERROR:", e)
 
@@ -85,6 +83,8 @@ if connect_wifi():
     ota_check()
 
 print("=== SENSOR LOOP ===")
+print("VL53: WARM UP...")
+time.sleep(2)        # حل (3): وقت استقرار الليزر
 
 # ================= MAIN LOOP =================
 while True:
@@ -99,17 +99,28 @@ while True:
 
         DA = DB = DC = None
 
-        # ---- ONE LASER PER CYCLE ----
+        # ---- ONE LASER PER CYCLE (حل 2) ----
         if laser_index == 0:
             d = A_dist.read()
+            if d is None or d == 0:
+                time.sleep_ms(50)
+                d = A_dist.read()
             DA = None if d is None else round((d/10)*K_VL53,2)
             active = "A"
+
         elif laser_index == 1:
             d = B_dist.read()
+            if d is None or d == 0:
+                time.sleep_ms(50)
+                d = B_dist.read()
             DB = None if d is None else round((d/10)*K_VL53,2)
             active = "B"
+
         else:
             d = C_dist.read()
+            if d is None or d == 0:
+                time.sleep_ms(50)
+                d = C_dist.read()
             DC = None if d is None else round((d/10)*K_VL53,2)
             active = "C"
 
@@ -132,4 +143,4 @@ while True:
         print("ERR:", e)
 
     gc.collect()
-    time.sleep(5)
+    time.sleep(2)     # حل (4): منع idle الطويل
