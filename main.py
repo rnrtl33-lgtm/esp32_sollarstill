@@ -6,6 +6,13 @@ import network, urequests
 SSID = "stc_wifi_8105"
 PASSWORD = "bfw6qtn7tu3"
 
+# ================= STOP BUTTON =================
+STOP_BTN = Pin(0, Pin.IN, Pin.PULL_UP)  # زر BOOT
+
+def check_stop():
+    if not STOP_BTN.value():
+        machine.reset()
+
 # ================= THINGSPEAK =================
 API_A = "EU6EE36IJ7WSVYP3"
 API_B = "E8CTAK8MCUWLVQJ2"
@@ -99,25 +106,32 @@ time.sleep(2)
 
 # ================= MAIN LOOP =================
 while True:
+    machine.idle()        # <<< الحل الأساسي
+    check_stop()          # <<< زر إيقاف فوري
+
     try:
+        # ---- A ----
         Ta,_ = A_air.measure()
         Tw,_ = A_wat.measure()
         d = A_dist.read()
         if d: A["D"] += (d/10)*K_VL53
         A["Ta"]+=Ta; A["Tw"]+=Tw; A["n"]+=1
 
+        # ---- B ----
         Ta,_ = B_air.measure()
         Tw,_ = B_wat.measure()
         d = B_dist.read()
         if d: B["D"] += (d/10)*K_VL53
         B["Ta"]+=Ta; B["Tw"]+=Tw; B["n"]+=1
 
+        # ---- C ----
         Ta,_ = C_air.measure()
         Tw,_ = C_wat.measure()
         d = C_dist.read()
         if d: C["D"] += (d/10)*K_VL53
         C["Ta"]+=Ta; C["Tw"]+=Tw; C["n"]+=1
 
+        # ---- LIGHT ----
         UV = D_uv.read_uv()
         full, ir = D_lux.get_raw_luminosity()
         lux = D_lux.calculate_lux(full, ir)
