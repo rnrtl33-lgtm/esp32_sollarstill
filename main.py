@@ -88,14 +88,13 @@ D_lux = TSL2591(i2cD)
 
 # ================= INIT =================
 K_VL53 = 0.66
-laser_index = 0
 
 A = {"Ta":0,"Tw":0,"D":0,"n":0}
 B = {"Ta":0,"Tw":0,"D":0,"n":0}
 C = {"Ta":0,"Tw":0,"D":0,"n":0}
 Dsum = {"UV":0,"LUX":0,"IR":0,"n":0}
 
-SEND_INTERVAL = 5 * 60 * 1000
+SEND_INTERVAL = 30 * 1000   # <<< كل 30 ثانية
 last_send = time.ticks_ms()
 
 # ================= START =================
@@ -106,29 +105,32 @@ time.sleep(2)
 
 # ================= MAIN LOOP =================
 while True:
-    machine.idle()        # <<< الحل الأساسي
-    check_stop()          # <<< زر إيقاف فوري
+    machine.idle()
+    check_stop()
 
     try:
         # ---- A ----
         Ta,_ = A_air.measure()
         Tw,_ = A_wat.measure()
         d = A_dist.read()
-        if d: A["D"] += (d/10)*K_VL53
+        if d:
+            A["D"] += (d/10)*K_VL53
         A["Ta"]+=Ta; A["Tw"]+=Tw; A["n"]+=1
 
         # ---- B ----
         Ta,_ = B_air.measure()
         Tw,_ = B_wat.measure()
         d = B_dist.read()
-        if d: B["D"] += (d/10)*K_VL53
+        if d:
+            B["D"] += (d/10)*K_VL53
         B["Ta"]+=Ta; B["Tw"]+=Tw; B["n"]+=1
 
         # ---- C ----
         Ta,_ = C_air.measure()
         Tw,_ = C_wat.measure()
         d = C_dist.read()
-        if d: C["D"] += (d/10)*K_VL53
+        if d:
+            C["D"] += (d/10)*K_VL53
         C["Ta"]+=Ta; C["Tw"]+=Tw; C["n"]+=1
 
         # ---- LIGHT ----
