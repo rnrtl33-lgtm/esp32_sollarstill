@@ -85,8 +85,8 @@ D_lux = TSL2591(i2cD)
 # ================= INIT =================
 K_VL53 = 0.66
 CYCLE_DELAY = 30          # 30 ثانية بين كل دورة
-SEND_INTERVAL = 5*60      # 5 دقائق
-CYCLES_REQUIRED = 3
+SEND_INTERVAL = 60        # <<< الإرسال كل دقيقة
+CYCLES_REQUIRED = 3       # ثلاث دورات لكل A/B/C
 
 A = {"Ta":0,"Tw":0,"D":0,"n":0}
 B = {"Ta":0,"Tw":0,"D":0,"n":0}
