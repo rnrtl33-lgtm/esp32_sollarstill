@@ -132,4 +132,4 @@ while True:
         print("ERR:", e)
 
     gc.collect()
-    time.sleep(50)
+    time.sleep(5)
