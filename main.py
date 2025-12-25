@@ -56,10 +56,17 @@ C_air, C_wat, C_dist = SHT30(i2cC,0x45), SHT30(i2cC,0x44), VL53L0X(i2cC)
 D_uv  = LTR390(i2cD)
 D_lux = TSL2591(i2cD)
 
+# ================= VL53L0X CALIBRATION =================
+CAL_A, OFF_A = 0.74, -0.3
+CAL_B, OFF_B = 0.90, -0.2
+CAL_C, OFF_C = 1.00,  0.0
+
+VL_WARMUP = 5
+Aw = Bw = Cw = 0
+
 # ================= PARAMS =================
-K_VL53 = 0.66
-CYCLE_DELAY = 30           # 30 ثانية بين كل قراءة
-SEND_INTERVAL = 15    # <<< الإرسال كل 10 دقائق
+CYCLE_DELAY = 30        # 30 ثانية بين كل قراءة
+SEND_INTERVAL = 600     # 10 دقائق
 CYCLES_REQUIRED = 3
 
 # ================= STORAGE =================
@@ -71,40 +78,66 @@ Dsum = {"UV":0,"LUX":0,"IR":0,"n":0}
 cycle_index = 0
 last_send = time.time()
 
-print("=== SYSTEM RUNNING (10 MIN MODE) ===")
+print("=== SYSTEM RUNNING (FINAL CALIBRATED MODE) ===")
 
 # ================= MAIN LOOP =================
 while True:
     try:
+        # ---------- MODEL A ----------
         if cycle_index == 0:
             Ta,_ = A_air.measure()
             Tw,_ = A_wat.measure()
             d = A_dist.read()
-            if d:
-                A["D"] += (d/10)*K_VL53
-            A["Ta"]+=Ta; A["Tw"]+=Tw; A["n"]+=1
 
+            if d:
+                Aw += 1
+                if Aw > VL_WARMUP:
+                    A["D"] += (d/10)*CAL_A + OFF_A
+
+            A["Ta"] += Ta
+            A["Tw"] += Tw
+            A["n"]  += 1
+
+        # ---------- MODEL B ----------
         elif cycle_index == 1:
             Ta,_ = B_air.measure()
             Tw,_ = B_wat.measure()
             d = B_dist.read()
-            if d:
-                B["D"] += (d/10)*K_VL53
-            B["Ta"]+=Ta; B["Tw"]+=Tw; B["n"]+=1
 
+            if d:
+                Bw += 1
+                if Bw > VL_WARMUP:
+                    B["D"] += (d/10)*CAL_B + OFF_B
+
+            B["Ta"] += Ta
+            B["Tw"] += Tw
+            B["n"]  += 1
+
+        # ---------- MODEL C ----------
         elif cycle_index == 2:
             Ta,_ = C_air.measure()
             Tw,_ = C_wat.measure()
             d = C_dist.read()
-            if d:
-                C["D"] += (d/10)*K_VL53
-            C["Ta"]+=Ta; C["Tw"]+=Tw; C["n"]+=1
 
+            if d:
+                Cw += 1
+                if Cw > VL_WARMUP:
+                    C["D"] += (d/10)*CAL_C + OFF_C
+
+            C["Ta"] += Ta
+            C["Tw"] += Tw
+            C["n"]  += 1
+
+        # ---------- MODEL D ----------
         else:
             UV = D_uv.read_uv()
             full, ir = D_lux.get_raw_luminosity()
             lux = D_lux.calculate_lux(full, ir)
-            Dsum["UV"]+=UV; Dsum["LUX"]+=lux; Dsum["IR"]+=ir; Dsum["n"]+=1
+
+            Dsum["UV"]  += UV
+            Dsum["LUX"] += lux
+            Dsum["IR"]  += ir
+            Dsum["n"]   += 1
 
     except:
         pass
@@ -112,7 +145,7 @@ while True:
     cycle_index = (cycle_index + 1) % 4
     time.sleep(CYCLE_DELAY)
 
-    # ===== SEND =====
+    # ================= SEND =================
     if (
         time.time() - last_send >= SEND_INTERVAL and
         A["n"] >= CYCLES_REQUIRED and
