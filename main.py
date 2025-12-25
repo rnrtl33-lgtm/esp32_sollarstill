@@ -20,19 +20,22 @@ def send_ts(api, f1, f2, f3):
         ).format(api, f1, f2, f3)
         r = urequests.get(url)
         r.close()
-    except:
-        pass
+        print("TS SENT:", api, f1, f2, f3)
+    except Exception as e:
+        print("TS ERROR:", e)
 
 # ================= WIFI CONNECT =================
 def connect_wifi():
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     if not wlan.isconnected():
+        print("Connecting WiFi...")
         wlan.connect(SSID, PASSWORD)
         for _ in range(20):
             if wlan.isconnected():
                 break
             time.sleep(1)
+    print("WiFi connected:", wlan.isconnected())
 
 connect_wifi()
 
@@ -42,16 +45,25 @@ i2cB = SoftI2C(sda=Pin(25), scl=Pin(26))
 i2cC = SoftI2C(sda=Pin(32), scl=Pin(14))
 i2cD = SoftI2C(sda=Pin(15), scl=Pin(2))
 
-# ================= LIBS =================
+# ================= LIBRARIES =================
 from lib.sht30_clean import SHT30
 from lib.vl53l0x_clean import VL53L0X
 from lib.ltr390_clean import LTR390
 from lib.tsl2591_fixed import TSL2591
 
 # ================= SENSORS =================
-A_air, A_wat, A_dist = SHT30(i2cA,0x45), SHT30(i2cA,0x44), VL53L0X(i2cA)
-B_air, B_wat, B_dist = SHT30(i2cB,0x45), SHT30(i2cB,0x44), VL53L0X(i2cB)
-C_air, C_wat, C_dist = SHT30(i2cC,0x45), SHT30(i2cC,0x44), VL53L0X(i2cC)
+A_air = SHT30(i2cA, 0x45)
+A_wat = SHT30(i2cA, 0x44)
+A_dist = VL53L0X(i2cA)
+
+B_air = SHT30(i2cB, 0x45)
+B_wat = SHT30(i2cB, 0x44)
+B_dist = VL53L0X(i2cB)
+
+C_air = SHT30(i2cC, 0x45)
+C_wat = SHT30(i2cC, 0x44)
+C_dist = VL53L0X(i2cC)
+
 D_uv  = LTR390(i2cD)
 D_lux = TSL2591(i2cD)
 
@@ -65,34 +77,34 @@ print("=== SYSTEM START ===")
 # ================= MAIN LOOP =================
 while True:
     try:
-        # ---------- READ A ----------
+        # ---------- MODEL A ----------
         TaA,_ = A_air.measure()
         TwA,_ = A_wat.measure()
         dA = None
         try:
-            dA = (A_dist.read()/10)*CAL_A + OFF_A
+            dA = (A_dist.read() / 10) * CAL_A + OFF_A
         except:
             pass
 
-        # ---------- READ B ----------
+        # ---------- MODEL B ----------
         TaB,_ = B_air.measure()
         TwB,_ = B_wat.measure()
         dB = None
         try:
-            dB = (B_dist.read()/10)*CAL_B + OFF_B
+            dB = (B_dist.read() / 10) * CAL_B + OFF_B
         except:
             pass
 
-        # ---------- READ C ----------
+        # ---------- MODEL C ----------
         TaC,_ = C_air.measure()
         TwC,_ = C_wat.measure()
         dC = None
         try:
-            dC = (C_dist.read()/10)*CAL_C + OFF_C
+            dC = (C_dist.read() / 10) * CAL_C + OFF_C
         except:
             pass
 
-        # ---------- READ D ----------
+        # ---------- MODEL D ----------
         try:
             UV = D_uv.read_uv()
             full, ir = D_lux.get_raw_luminosity()
@@ -100,20 +112,20 @@ while True:
         except:
             UV, lux, ir = None, None, None
 
-        # ---------- PRINT FIRST ----------
-        print("\n----- SENSOR READINGS -----")
-        print("A | Ta:", round(TaA,2), "Tw:", round(TwA,2),
+        # ---------- PRINT SNAPSHOT ----------
+        print("\n----- SENSOR SNAPSHOT -----")
+        print("Model A | Ta:", round(TaA,2), "Tw:", round(TwA,2),
               "Dist:", round(dA,2) if dA is not None else "--", "cm")
-        print("B | Ta:", round(TaB,2), "Tw:", round(TwB,2),
+        print("Model B | Ta:", round(TaB,2), "Tw:", round(TwB,2),
               "Dist:", round(dB,2) if dB is not None else "--", "cm")
-        print("C | Ta:", round(TaC,2), "Tw:", round(TwC,2),
+        print("Model C | Ta:", round(TaC,2), "Tw:", round(TwC,2),
               "Dist:", round(dC,2) if dC is not None else "--", "cm")
-        print("D | UV:", UV if UV is not None else "--",
+        print("Model D | UV:", UV if UV is not None else "--",
               "Lux:", lux if lux is not None else "--",
               "IR:", ir if ir is not None else "--")
         print("---------------------------")
 
-        # ---------- SEND AFTER PRINT ----------
+        # ---------- SEND TO THINGSPEAK ----------
         send_ts(API_A, round(TaA,2), round(TwA,2), round(dA,2) if dA else 0)
         send_ts(API_B, round(TaB,2), round(TwB,2), round(dB,2) if dB else 0)
         send_ts(API_C, round(TaC,2), round(TwC,2), round(dC,2) if dC else 0)
