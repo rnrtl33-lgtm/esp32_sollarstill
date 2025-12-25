@@ -23,7 +23,7 @@ def send_ts(api, f1, f2, f3):
     except:
         pass
 
-# ================= WIFI =================
+# ================= WIFI CONNECT =================
 def connect_wifi():
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
@@ -65,7 +65,7 @@ print("=== SYSTEM START ===")
 # ================= MAIN LOOP =================
 while True:
     try:
-        # ---------- READ ----------
+        # ---------- READ A ----------
         TaA,_ = A_air.measure()
         TwA,_ = A_wat.measure()
         dA = None
@@ -74,40 +74,57 @@ while True:
         except:
             pass
 
+        # ---------- READ B ----------
         TaB,_ = B_air.measure()
         TwB,_ = B_wat.measure()
-        dB = (B_dist.read()/10)*CAL_B + OFF_B
+        dB = None
+        try:
+            dB = (B_dist.read()/10)*CAL_B + OFF_B
+        except:
+            pass
 
+        # ---------- READ C ----------
         TaC,_ = C_air.measure()
         TwC,_ = C_wat.measure()
-        dC = (C_dist.read()/10)*CAL_C + OFF_C
+        dC = None
+        try:
+            dC = (C_dist.read()/10)*CAL_C + OFF_C
+        except:
+            pass
 
-        UV = D_uv.read_uv()
-        full, ir = D_lux.get_raw_luminosity()
-        lux = D_lux.calculate_lux(full, ir)
+        # ---------- READ D ----------
+        try:
+            UV = D_uv.read_uv()
+            full, ir = D_lux.get_raw_luminosity()
+            lux = D_lux.calculate_lux(full, ir)
+        except:
+            UV, lux, ir = None, None, None
 
         # ---------- PRINT FIRST ----------
         print("\n----- SENSOR READINGS -----")
         print("A | Ta:", round(TaA,2), "Tw:", round(TwA,2),
-              "Dist:", round(dA,2) if dA else "--", "cm")
+              "Dist:", round(dA,2) if dA is not None else "--", "cm")
         print("B | Ta:", round(TaB,2), "Tw:", round(TwB,2),
-              "Dist:", round(dB,2), "cm")
+              "Dist:", round(dB,2) if dB is not None else "--", "cm")
         print("C | Ta:", round(TaC,2), "Tw:", round(TwC,2),
-              "Dist:", round(dC,2), "cm")
-        print("D | UV:", round(UV,2),
-              "Lux:", round(lux,2),
-              "IR:", ir)
+              "Dist:", round(dC,2) if dC is not None else "--", "cm")
+        print("D | UV:", UV if UV is not None else "--",
+              "Lux:", lux if lux is not None else "--",
+              "IR:", ir if ir is not None else "--")
         print("---------------------------")
 
         # ---------- SEND AFTER PRINT ----------
         send_ts(API_A, round(TaA,2), round(TwA,2), round(dA,2) if dA else 0)
-        send_ts(API_B, round(TaB,2), round(TwB,2), round(dB,2))
-        send_ts(API_C, round(TaC,2), round(TwC,2), round(dC,2))
-        send_ts(API_D, round(UV,2), round(lux,2), ir)
+        send_ts(API_B, round(TaB,2), round(TwB,2), round(dB,2) if dB else 0)
+        send_ts(API_C, round(TaC,2), round(TwC,2), round(dC,2) if dC else 0)
+        send_ts(API_D,
+                round(UV,2) if UV else 0,
+                round(lux,2) if lux else 0,
+                ir if ir else 0)
 
         gc.collect()
 
     except Exception as e:
-        print("ERROR:", e)
+        print("UNEXPECTED ERROR:", e)
 
     time.sleep(10)
