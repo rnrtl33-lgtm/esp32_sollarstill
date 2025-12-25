@@ -1,4 +1,4 @@
-import time, gc, machine
+import time, gc
 from machine import Pin, SoftI2C
 import network, urequests
 
@@ -20,19 +20,22 @@ def send_ts(api, f1, f2, f3):
         ).format(api, f1, f2, f3)
         r = urequests.get(url)
         r.close()
-    except:
-        pass
+        print("TS SENT:", api, f1, f2, f3)
+    except Exception as e:
+        print("TS ERROR:", e)
 
 # ================= WIFI CONNECT =================
 def connect_wifi():
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     if not wlan.isconnected():
+        print("Connecting WiFi...")
         wlan.connect(SSID, PASSWORD)
         t = 20
         while not wlan.isconnected() and t > 0:
             time.sleep(1)
             t -= 1
+    print("WiFi:", wlan.isconnected())
     return wlan.isconnected()
 
 connect_wifi()
@@ -60,13 +63,13 @@ D_lux = TSL2591(i2cD)
 CAL_A, OFF_A = 0.74, -0.3
 CAL_B, OFF_B = 0.90, -0.2
 CAL_C, OFF_C = 1.00,  0.0
+VL_WARMUP = 3
 
-VL_WARMUP = 5
 Aw = Bw = Cw = 0
 
 # ================= PARAMS =================
-CYCLE_DELAY = 3        # 30 ثانية بين كل قراءة
-SEND_INTERVAL = 10     # 10 دقائق
+CYCLE_DELAY = 3
+SEND_INTERVAL = 10
 CYCLES_REQUIRED = 1
 
 # ================= STORAGE =================
@@ -78,16 +81,24 @@ Dsum = {"UV":0,"LUX":0,"IR":0,"n":0}
 cycle_index = 0
 last_send = time.time()
 
-print("=== SYSTEM RUNNING (FINAL CALIBRATED MODE) ===")
+print("=== SYSTEM RUNNING (DEBUG + SAFE MODE) ===")
 
 # ================= MAIN LOOP =================
 while True:
+    print("Cycle:", cycle_index)
+
     try:
         # ---------- MODEL A ----------
         if cycle_index == 0:
             Ta,_ = A_air.measure()
             Tw,_ = A_wat.measure()
-            d = A_dist.read()
+
+            d = None
+            try:
+                d = A_dist.read()
+                print("A raw dist:", d)
+            except:
+                print("A VL53 ERROR (ignored)")
 
             if d:
                 Aw += 1
@@ -103,6 +114,7 @@ while True:
             Ta,_ = B_air.measure()
             Tw,_ = B_wat.measure()
             d = B_dist.read()
+            print("B raw dist:", d)
 
             if d:
                 Bw += 1
@@ -118,6 +130,7 @@ while True:
             Ta,_ = C_air.measure()
             Tw,_ = C_wat.measure()
             d = C_dist.read()
+            print("C raw dist:", d)
 
             if d:
                 Cw += 1
@@ -139,39 +152,43 @@ while True:
             Dsum["IR"]  += ir
             Dsum["n"]   += 1
 
-    except:
-        pass
+    except Exception as e:
+        print("LOOP ERROR:", e)
 
     cycle_index = (cycle_index + 1) % 4
     time.sleep(CYCLE_DELAY)
 
     # ================= SEND =================
-    if (
-        time.time() - last_send >= SEND_INTERVAL and
-        A["n"] >= CYCLES_REQUIRED and
-        B["n"] >= CYCLES_REQUIRED and
-        C["n"] >= CYCLES_REQUIRED
-    ):
-        send_ts(API_A,
-            round(A["Ta"]/A["n"],2),
-            round(A["Tw"]/A["n"],2),
-            round(A["D"]/A["n"],2)
-        )
-        send_ts(API_B,
-            round(B["Ta"]/B["n"],2),
-            round(B["Tw"]/B["n"],2),
-            round(B["D"]/B["n"],2)
-        )
-        send_ts(API_C,
-            round(C["Ta"]/C["n"],2),
-            round(C["Tw"]/C["n"],2),
-            round(C["D"]/C["n"],2)
-        )
-        send_ts(API_D,
-            round(Dsum["UV"]/Dsum["n"],2),
-            round(Dsum["LUX"]/Dsum["n"],2),
-            round(Dsum["IR"]/Dsum["n"],2)
-        )
+    if time.time() - last_send >= SEND_INTERVAL:
+        print("=== SENDING DATA ===")
+
+        if A["n"]:
+            send_ts(API_A,
+                round(A["Ta"]/A["n"],2),
+                round(A["Tw"]/A["n"],2),
+                round(A["D"]/max(A["n"],1),2)
+            )
+
+        if B["n"]:
+            send_ts(API_B,
+                round(B["Ta"]/B["n"],2),
+                round(B["Tw"]/B["n"],2),
+                round(B["D"]/max(B["n"],1),2)
+            )
+
+        if C["n"]:
+            send_ts(API_C,
+                round(C["Ta"]/C["n"],2),
+                round(C["Tw"]/C["n"],2),
+                round(C["D"]/max(C["n"],1),2)
+            )
+
+        if Dsum["n"]:
+            send_ts(API_D,
+                round(Dsum["UV"]/Dsum["n"],2),
+                round(Dsum["LUX"]/Dsum["n"],2),
+                round(Dsum["IR"]/Dsum["n"],2)
+            )
 
         A.update({"Ta":0,"Tw":0,"D":0,"n":0})
         B.update({"Ta":0,"Tw":0,"D":0,"n":0})
