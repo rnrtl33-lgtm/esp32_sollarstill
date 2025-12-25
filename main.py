@@ -7,6 +7,7 @@ SSID = "stc_wifi_8105"
 PASSWORD = "bfw6qtn7tu3"
 
 # ================= THINGSPEAK =================
+API_A = "EU6EE36IJ7WSVYP3"
 API_B = "E8CTAK8MCUWLVQJ2"
 API_C = "Y1FWSOX7Z6YZ8QMU"
 API_D = "HG8GG8DF40LCGV99"
@@ -40,6 +41,7 @@ def connect_wifi():
 connect_wifi()
 
 # ================= I2C =================
+i2cA = SoftI2C(sda=Pin(19), scl=Pin(18))
 i2cB = SoftI2C(sda=Pin(25), scl=Pin(26))
 i2cC = SoftI2C(sda=Pin(32), scl=Pin(14))
 i2cD = SoftI2C(sda=Pin(15), scl=Pin(2))
@@ -51,23 +53,26 @@ from lib.ltr390_clean import LTR390
 from lib.tsl2591_fixed import TSL2591
 
 # ================= SENSORS =================
+A_air, A_wat, A_dist = SHT30(i2cA,0x45), SHT30(i2cA,0x44), VL53L0X(i2cA)
 B_air, B_wat, B_dist = SHT30(i2cB,0x45), SHT30(i2cB,0x44), VL53L0X(i2cB)
 C_air, C_wat, C_dist = SHT30(i2cC,0x45), SHT30(i2cC,0x44), VL53L0X(i2cC)
 D_uv  = LTR390(i2cD)
 D_lux = TSL2591(i2cD)
 
-# ================= VL53L0X CALIBRATION =================
+# ================= VL53 CAL =================
+CAL_A, OFF_A = 0.74, -0.3
 CAL_B, OFF_B = 0.90, -0.2
 CAL_C, OFF_C = 1.00,  0.0
 VL_WARMUP = 3
 
-Bw = Cw = 0
+Aw = Bw = Cw = 0
 
 # ================= PARAMS =================
-CYCLE_DELAY = 3        # قراءة كل 3 ثواني
-SEND_INTERVAL = 10     # إرسال كل 10 ثواني
+CYCLE_DELAY = 3
+SEND_INTERVAL = 10
 
 # ================= STORAGE =================
+A = {"Ta":0,"Tw":0,"D":0,"n":0}
 B = {"Ta":0,"Tw":0,"D":0,"n":0}
 C = {"Ta":0,"Tw":0,"D":0,"n":0}
 Dsum = {"UV":0,"LUX":0,"IR":0,"n":0}
@@ -75,7 +80,7 @@ Dsum = {"UV":0,"LUX":0,"IR":0,"n":0}
 cycle_index = 0
 last_send = time.time()
 
-print("=== SYSTEM RUNNING (B, C, D ONLY) ===")
+print("=== SYSTEM RUNNING (A, B, C, D) ===")
 
 # ================= MAIN LOOP =================
 while True:
@@ -87,7 +92,6 @@ while True:
             Ta,_ = B_air.measure()
             Tw,_ = B_wat.measure()
             d = B_dist.read()
-            print("B raw dist:", d)
 
             if d:
                 Bw += 1
@@ -101,7 +105,6 @@ while True:
             Ta,_ = C_air.measure()
             Tw,_ = C_wat.measure()
             d = C_dist.read()
-            print("C raw dist:", d)
 
             if d:
                 Cw += 1
@@ -111,7 +114,7 @@ while True:
             C["Ta"] += Ta; C["Tw"] += Tw; C["n"] += 1
 
         # ---------- MODEL D ----------
-        else:
+        elif cycle_index == 2:
             UV = D_uv.read_uv()
             full, ir = D_lux.get_raw_luminosity()
             lux = D_lux.calculate_lux(full, ir)
@@ -121,15 +124,35 @@ while True:
             Dsum["IR"] += ir
             Dsum["n"] += 1
 
+        # ---------- MODEL A ----------
+        else:
+            Ta,_ = A_air.measure()
+            Tw,_ = A_wat.measure()
+            d = A_dist.read()
+
+            if d:
+                Aw += 1
+                if Aw > VL_WARMUP:
+                    A["D"] += (d/10)*CAL_A + OFF_A
+
+            A["Ta"] += Ta; A["Tw"] += Tw; A["n"] += 1
+
     except Exception as e:
         print("LOOP ERROR:", e)
 
-    cycle_index = (cycle_index + 1) % 3
+    cycle_index = (cycle_index + 1) % 4
     time.sleep(CYCLE_DELAY)
 
     # ================= SEND =================
     if time.time() - last_send >= SEND_INTERVAL:
         print("=== SENDING DATA ===")
+
+        if A["n"]:
+            send_ts(API_A,
+                round(A["Ta"]/A["n"],2),
+                round(A["Tw"]/A["n"],2),
+                round(A["D"]/max(A["n"],1),2)
+            )
 
         if B["n"]:
             send_ts(API_B,
@@ -152,6 +175,7 @@ while True:
                 round(Dsum["IR"]/Dsum["n"],2)
             )
 
+        A.update({"Ta":0,"Tw":0,"D":0,"n":0})
         B.update({"Ta":0,"Tw":0,"D":0,"n":0})
         C.update({"Ta":0,"Tw":0,"D":0,"n":0})
         Dsum.update({"UV":0,"LUX":0,"IR":0,"n":0})
