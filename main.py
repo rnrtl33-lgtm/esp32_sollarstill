@@ -7,7 +7,6 @@ SSID = "stc_wifi_8105"
 PASSWORD = "bfw6qtn7tu3"
 
 # ================= THINGSPEAK =================
-API_A = "EU6EE36IJ7WSVYP3"
 API_B = "E8CTAK8MCUWLVQJ2"
 API_C = "Y1FWSOX7Z6YZ8QMU"
 API_D = "HG8GG8DF40LCGV99"
@@ -31,112 +30,131 @@ def connect_wifi():
     if not wlan.isconnected():
         print("Connecting WiFi...")
         wlan.connect(SSID, PASSWORD)
-        for _ in range(20):
-            if wlan.isconnected():
-                break
+        t = 20
+        while not wlan.isconnected() and t > 0:
             time.sleep(1)
-    print("WiFi connected:", wlan.isconnected())
+            t -= 1
+    print("WiFi status:", wlan.isconnected())
+    return wlan.isconnected()
 
 connect_wifi()
 
 # ================= I2C =================
-i2cA = SoftI2C(sda=Pin(19), scl=Pin(18))
 i2cB = SoftI2C(sda=Pin(25), scl=Pin(26))
 i2cC = SoftI2C(sda=Pin(32), scl=Pin(14))
 i2cD = SoftI2C(sda=Pin(15), scl=Pin(2))
 
-# ================= LIBRARIES =================
+# ================= LIBS =================
 from lib.sht30_clean import SHT30
 from lib.vl53l0x_clean import VL53L0X
 from lib.ltr390_clean import LTR390
 from lib.tsl2591_fixed import TSL2591
 
 # ================= SENSORS =================
-A_air = SHT30(i2cA, 0x45)
-A_wat = SHT30(i2cA, 0x44)
-A_dist = VL53L0X(i2cA)
-
-B_air = SHT30(i2cB, 0x45)
-B_wat = SHT30(i2cB, 0x44)
-B_dist = VL53L0X(i2cB)
-
-C_air = SHT30(i2cC, 0x45)
-C_wat = SHT30(i2cC, 0x44)
-C_dist = VL53L0X(i2cC)
-
+B_air, B_wat, B_dist = SHT30(i2cB,0x45), SHT30(i2cB,0x44), VL53L0X(i2cB)
+C_air, C_wat, C_dist = SHT30(i2cC,0x45), SHT30(i2cC,0x44), VL53L0X(i2cC)
 D_uv  = LTR390(i2cD)
 D_lux = TSL2591(i2cD)
 
 # ================= VL53L0X CALIBRATION =================
-CAL_A, OFF_A = 0.74, -0.3
 CAL_B, OFF_B = 0.90, -0.2
 CAL_C, OFF_C = 1.00,  0.0
+VL_WARMUP = 3
 
-print("=== SYSTEM START ===")
+Bw = Cw = 0
+
+# ================= PARAMS =================
+CYCLE_DELAY = 3        # قراءة كل 3 ثواني
+SEND_INTERVAL = 10     # إرسال كل 10 ثواني
+
+# ================= STORAGE =================
+B = {"Ta":0,"Tw":0,"D":0,"n":0}
+C = {"Ta":0,"Tw":0,"D":0,"n":0}
+Dsum = {"UV":0,"LUX":0,"IR":0,"n":0}
+
+cycle_index = 0
+last_send = time.time()
+
+print("=== SYSTEM RUNNING (B, C, D ONLY) ===")
 
 # ================= MAIN LOOP =================
 while True:
     try:
-        # ---------- MODEL A ----------
-        TaA,_ = A_air.measure()
-        TwA,_ = A_wat.measure()
-        dA = None
-        try:
-            dA = (A_dist.read() / 10) * CAL_A + OFF_A
-        except:
-            pass
+        print("Cycle:", cycle_index)
 
         # ---------- MODEL B ----------
-        TaB,_ = B_air.measure()
-        TwB,_ = B_wat.measure()
-        dB = None
-        try:
-            dB = (B_dist.read() / 10) * CAL_B + OFF_B
-        except:
-            pass
+        if cycle_index == 0:
+            Ta,_ = B_air.measure()
+            Tw,_ = B_wat.measure()
+            d = B_dist.read()
+            print("B raw dist:", d)
+
+            if d:
+                Bw += 1
+                if Bw > VL_WARMUP:
+                    B["D"] += (d/10)*CAL_B + OFF_B
+
+            B["Ta"] += Ta; B["Tw"] += Tw; B["n"] += 1
 
         # ---------- MODEL C ----------
-        TaC,_ = C_air.measure()
-        TwC,_ = C_wat.measure()
-        dC = None
-        try:
-            dC = (C_dist.read() / 10) * CAL_C + OFF_C
-        except:
-            pass
+        elif cycle_index == 1:
+            Ta,_ = C_air.measure()
+            Tw,_ = C_wat.measure()
+            d = C_dist.read()
+            print("C raw dist:", d)
+
+            if d:
+                Cw += 1
+                if Cw > VL_WARMUP:
+                    C["D"] += (d/10)*CAL_C + OFF_C
+
+            C["Ta"] += Ta; C["Tw"] += Tw; C["n"] += 1
 
         # ---------- MODEL D ----------
-        try:
+        else:
             UV = D_uv.read_uv()
             full, ir = D_lux.get_raw_luminosity()
             lux = D_lux.calculate_lux(full, ir)
-        except:
-            UV, lux, ir = None, None, None
 
-        # ---------- PRINT SNAPSHOT ----------
-        print("\n----- SENSOR SNAPSHOT -----")
-        print("Model A | Ta:", round(TaA,2), "Tw:", round(TwA,2),
-              "Dist:", round(dA,2) if dA is not None else "--", "cm")
-        print("Model B | Ta:", round(TaB,2), "Tw:", round(TwB,2),
-              "Dist:", round(dB,2) if dB is not None else "--", "cm")
-        print("Model C | Ta:", round(TaC,2), "Tw:", round(TwC,2),
-              "Dist:", round(dC,2) if dC is not None else "--", "cm")
-        print("Model D | UV:", UV if UV is not None else "--",
-              "Lux:", lux if lux is not None else "--",
-              "IR:", ir if ir is not None else "--")
-        print("---------------------------")
-
-        # ---------- SEND TO THINGSPEAK ----------
-        send_ts(API_A, round(TaA,2), round(TwA,2), round(dA,2) if dA else 0)
-        send_ts(API_B, round(TaB,2), round(TwB,2), round(dB,2) if dB else 0)
-        send_ts(API_C, round(TaC,2), round(TwC,2), round(dC,2) if dC else 0)
-        send_ts(API_D,
-                round(UV,2) if UV else 0,
-                round(lux,2) if lux else 0,
-                ir if ir else 0)
-
-        gc.collect()
+            Dsum["UV"] += UV
+            Dsum["LUX"] += lux
+            Dsum["IR"] += ir
+            Dsum["n"] += 1
 
     except Exception as e:
-        print("UNEXPECTED ERROR:", e)
+        print("LOOP ERROR:", e)
 
-    time.sleep(10)
+    cycle_index = (cycle_index + 1) % 3
+    time.sleep(CYCLE_DELAY)
+
+    # ================= SEND =================
+    if time.time() - last_send >= SEND_INTERVAL:
+        print("=== SENDING DATA ===")
+
+        if B["n"]:
+            send_ts(API_B,
+                round(B["Ta"]/B["n"],2),
+                round(B["Tw"]/B["n"],2),
+                round(B["D"]/max(B["n"],1),2)
+            )
+
+        if C["n"]:
+            send_ts(API_C,
+                round(C["Ta"]/C["n"],2),
+                round(C["Tw"]/C["n"],2),
+                round(C["D"]/max(C["n"],1),2)
+            )
+
+        if Dsum["n"]:
+            send_ts(API_D,
+                round(Dsum["UV"]/Dsum["n"],2),
+                round(Dsum["LUX"]/Dsum["n"],2),
+                round(Dsum["IR"]/Dsum["n"],2)
+            )
+
+        B.update({"Ta":0,"Tw":0,"D":0,"n":0})
+        C.update({"Ta":0,"Tw":0,"D":0,"n":0})
+        Dsum.update({"UV":0,"LUX":0,"IR":0,"n":0})
+
+        last_send = time.time()
+        gc.collect()
