@@ -65,9 +65,9 @@ VL_WARMUP = 5
 Aw = Bw = Cw = 0
 
 # ================= PARAMS =================
-CYCLE_DELAY = 30        # 30 ثانية بين كل قراءة
-SEND_INTERVAL = 600     # 10 دقائق
-CYCLES_REQUIRED = 3
+CYCLE_DELAY = 3        # 30 ثانية بين كل قراءة
+SEND_INTERVAL = 10     # 10 دقائق
+CYCLES_REQUIRED = 1
 
 # ================= STORAGE =================
 A = {"Ta":0,"Tw":0,"D":0,"n":0}
