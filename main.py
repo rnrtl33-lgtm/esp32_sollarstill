@@ -11,7 +11,7 @@ import network, urequests
 # ================= WIFI =================
 SSID = "stc_wifi_8105"
 PASSWORD = "bfw6qtn7tu3"
-
+#  67777777777777
 # ================= THINGSPEAK =================
 API_A = "EU6EE36IJ7WSVYP3"
 API_B = "E8CTAK8MCUWLVQJ2"
