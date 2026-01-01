@@ -59,20 +59,30 @@ def init_i2c_and_sensors():
     i2cC = SoftI2C(sda=Pin(32), scl=Pin(14))
     i2cD = SoftI2C(sda=Pin(15), scl=Pin(16))
 
-    A_air  = SHT30(i2cA,0x45)
-    A_wat  = SHT30(i2cA,0x44)
+    # --- Model A ---
+    A_air  = SHT30(i2cA, 0x45)
+    A_wat  = SHT30(i2cA, 0x44)
     A_dist = VL53L0X(i2cA)
 
-    B_air  = SHT30(i2cB,0x45)
-    B_wat  = SHT30(i2cB,0x44)
+    # --- Model B ---
+    B_air  = SHT30(i2cB, 0x45)
+    B_wat  = SHT30(i2cB, 0x44)
     B_dist = VL53L0X(i2cB)
 
-    C_air  = SHT30(i2cC,0x45)
-    C_wat  = SHT30(i2cC,0x44)
+    # --- Model C ---
+    C_air  = SHT30(i2cC, 0x45)
+    C_wat  = SHT30(i2cC, 0x44)
     C_dist = VL53L0X(i2cC)
 
-    D_uv   = LTR390(i2cD)
-    D_lux  = TSL2591(i2cD)
+    # --- Model D (محمي) ---
+    try:
+        D_uv  = LTR390(i2cD)
+        D_lux = TSL2591(i2cD)
+        print("Model D detected")
+    except OSError as e:
+        print("Model D NOT detected:", e)
+        D_uv = None
+        D_lux = None
 
 # أول تهيئة
 init_i2c_and_sensors()
@@ -99,7 +109,7 @@ cycle_index = 0
 last_send = time.time()
 err_count = 0
 
-print("\n=== SYSTEM STARTED (A = B = C MODE) ===\n")
+print("\n=== SYSTEM STARTED (SAFE MODE WITH MODEL D PROTECTION) ===\n")
 
 # ================= MAIN LOOP =================
 while True:
@@ -139,10 +149,11 @@ while True:
 
         # ---------- D ----------
         else:
-            UV = D_uv.read_uv()
-            full, ir = D_lux.get_raw_luminosity()
-            lux = D_lux.calculate_lux(full, ir)
-            Dsum["UV"]+=UV; Dsum["LUX"]+=lux; Dsum["IR"]+=ir; Dsum["n"]+=1
+            if D_uv and D_lux:
+                UV = D_uv.read_uv()
+                full, ir = D_lux.get_raw_luminosity()
+                lux = D_lux.calculate_lux(full, ir)
+                Dsum["UV"]+=UV; Dsum["LUX"]+=lux; Dsum["IR"]+=ir; Dsum["n"]+=1
 
         err_count = 0
 
@@ -198,3 +209,6 @@ while True:
 
         last_send = time.time()
         gc.collect()
+
+
+    
