@@ -78,6 +78,17 @@ C_dis = VL53L0X(i2cC)
 D_uv  = LTR390(i2cD)
 D_lux = TSL2591(i2cD)
 
+# ================= INIT MODEL D (CRITICAL) =================
+# --- TSL2591 ---
+D_lux.enable()
+D_lux.set_gain(TSL2591.GAIN_MED)
+D_lux.set_timing(TSL2591.INTEGRATIONTIME_200MS)
+time.sleep_ms(400)
+
+# --- LTR390 ---
+D_uv.set_mode_uv()
+time.sleep_ms(100)
+
 # ================= WEIGHT =================
 # --- Model A ---
 hxA = HX711(dt=34, sck=33)
@@ -85,7 +96,7 @@ hxA.offset = 46770.14
 hxA.scale  = 410.05076
 
 # --- Model B ---
-hxB = HX711(dt=35, sck=17)   # كما طلبت
+hxB = HX711(dt=35, sck=17)   # كما ثبّتَّه
 hxB.offset = 24163.08
 hxB.scale  = 416.56064
 
@@ -94,7 +105,7 @@ READ_DELAY    = 2
 SEND_INTERVAL = 30
 last_send = time.time()
 
-print("\n=== SYSTEM STARTED (A+B+C+D STABLE MODE) ===\n")
+print("\n=== SYSTEM STARTED (A+B+C+D FINAL STABLE MODE) ===\n")
 
 # ================= MAIN LOOP =================
 while True:
@@ -121,6 +132,7 @@ while True:
 
         # -------- Model D --------
         UV = D_uv.read_uv()
+        time.sleep_ms(50)
         full, ir = D_lux.get_raw_luminosity()
         lux = D_lux.calculate_lux(full, ir)
 
