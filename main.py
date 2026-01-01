@@ -2,7 +2,7 @@
 # ESP32 SENSOR SYSTEM
 # A,B: Temp + Distance + Weight
 # C  : Temp + Distance
-# D  : UV + LUX + IR
+# D  : UV + LUX + IR   (SCL = GPIO16)
 # =====================================================
 
 import time, gc
@@ -56,7 +56,7 @@ from lib.tsl2591_fixed import TSL2591
 i2cA = SoftI2C(sda=Pin(19), scl=Pin(18))
 i2cB = SoftI2C(sda=Pin(25), scl=Pin(26))
 i2cC = SoftI2C(sda=Pin(32), scl=Pin(14))
-i2cD = SoftI2C(sda=Pin(15), scl=Pin(2))
+i2cD = SoftI2C(sda=Pin(15), scl=Pin(16))   # ✅ تم التعديل هنا
 
 # ================= SENSORS =================
 # --- Model A ---
@@ -96,7 +96,7 @@ hxA.offset = 46770.14
 hxA.scale  = 410.05076
 
 # --- Model B ---
-hxB = HX711(dt=35, sck=17)   # كما ثبّتَّه
+hxB = HX711(dt=35, sck=17)
 hxB.offset = 24163.08
 hxB.scale  = 416.56064
 
@@ -105,7 +105,7 @@ READ_DELAY    = 2
 SEND_INTERVAL = 30
 last_send = time.time()
 
-print("\n=== SYSTEM STARTED (A+B+C+D FINAL STABLE MODE) ===\n")
+print("\n=== SYSTEM STARTED (GPIO16 FIXED – FINAL MODE) ===\n")
 
 # ================= MAIN LOOP =================
 while True:
