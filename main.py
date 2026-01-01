@@ -209,6 +209,3 @@ while True:
 
         last_send = time.time()
         gc.collect()
-
-
-    
