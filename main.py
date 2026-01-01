@@ -1,4 +1,11 @@
-import time, gc, machine
+# =====================================================
+# ESP32 SENSOR SYSTEM
+# A,B: Temp + Distance + Weight
+# C  : Temp + Distance
+# D  : UV + LUX + IR
+# =====================================================
+
+import time, gc
 from machine import Pin, SoftI2C
 import network, urequests
 
@@ -7,20 +14,20 @@ SSID = "stc_wifi_8105"
 PASSWORD = "bfw6qtn7tu3"
 
 # ================= THINGSPEAK =================
-API_A = "EU6EE36IJ7WSVYP3"   # Heartbeat
+API_A = "EU6EE36IJ7WSVYP3"
 API_B = "E8CTAK8MCUWLVQJ2"
 API_C = "Y1FWSOX7Z6YZ8QMU"
 API_D = "HG8GG8DF40LCGV99"
 
-def send_ts(api, f1, f2, f3):
+def send_ts(api, f1, f2, f3, f4=None):
     try:
-        url = (
-            "https://api.thingspeak.com/update?"
-            "api_key={}&field1={}&field2={}&field3={}"
-        ).format(api, f1, f2, f3)
+        url = f"https://api.thingspeak.com/update?api_key={api}"
+        url += f"&field1={f1}&field2={f2}&field3={f3}"
+        if f4 is not None:
+            url += f"&field4={f4}"
         r = urequests.get(url)
         r.close()
-        print("TS SENT:", api, f1, f2, f3)
+        print("TS SENT:", api, f1, f2, f3, f4)
     except Exception as e:
         print("TS ERROR:", e)
 
@@ -30,154 +37,126 @@ def connect_wifi():
     wlan.active(True)
     if not wlan.isconnected():
         wlan.connect(SSID, PASSWORD)
-        t = 20
-        while not wlan.isconnected() and t > 0:
+        for _ in range(20):
+            if wlan.isconnected():
+                break
             time.sleep(1)
-            t -= 1
     print("WiFi connected:", wlan.isconnected())
-    return wlan.isconnected()
 
 connect_wifi()
 
 # ================= LIBS =================
 from lib.sht30_clean import SHT30
 from lib.vl53l0x_clean import VL53L0X
+from lib.hx711 import HX711
 from lib.ltr390_clean import LTR390
 from lib.tsl2591_fixed import TSL2591
 
-# ================= I2C INIT =================
-def init_i2c_and_sensors():
-    global i2cB, i2cC, i2cD
-    global B_air, B_wat, B_dist
-    global C_air, C_wat, C_dist
-    global D_uv, D_lux
+# ================= I2C BUSSES =================
+i2cA = SoftI2C(sda=Pin(19), scl=Pin(18))
+i2cB = SoftI2C(sda=Pin(25), scl=Pin(26))
+i2cC = SoftI2C(sda=Pin(32), scl=Pin(14))
+i2cD = SoftI2C(sda=Pin(15), scl=Pin(2))
 
-    print("Reinitializing I2C & sensors...")
+# ================= SENSORS =================
+# --- Model A ---
+A_out = SHT30(i2cA, 0x45)
+A_in  = SHT30(i2cA, 0x44)
+A_dis = VL53L0X(i2cA)
 
-    i2cB = SoftI2C(sda=Pin(25), scl=Pin(26))
-    i2cC = SoftI2C(sda=Pin(32), scl=Pin(14))
-    i2cD = SoftI2C(sda=Pin(15), scl=Pin(2))
+# --- Model B ---
+B_out = SHT30(i2cB, 0x45)
+B_in  = SHT30(i2cB, 0x44)
+B_dis = VL53L0X(i2cB)
 
-    B_air  = SHT30(i2cB,0x45)
-    B_wat  = SHT30(i2cB,0x44)
-    B_dist = VL53L0X(i2cB)
+# --- Model C ---
+C_out = SHT30(i2cC, 0x45)
+C_in  = SHT30(i2cC, 0x44)
+C_dis = VL53L0X(i2cC)
 
-    C_air  = SHT30(i2cC,0x45)
-    C_wat  = SHT30(i2cC,0x44)
-    C_dist = VL53L0X(i2cC)
+# --- Model D ---
+D_uv  = LTR390(i2cD)
+D_lux = TSL2591(i2cD)
 
-    D_uv   = LTR390(i2cD)
-    D_lux  = TSL2591(i2cD)
+# ================= WEIGHT =================
+# --- Model A ---
+hxA = HX711(dt=34, sck=33)
+hxA.offset = 46770.14
+hxA.scale  = 410.05076
 
-# أول تهيئة
-init_i2c_and_sensors()
+# --- Model B ---
+hxB = HX711(dt=35, sck=17)   # كما طلبت
+hxB.offset = 24163.08
+hxB.scale  = 416.56064
 
-# ================= VL53 CAL =================
-CAL_B, OFF_B = 0.90, -0.2
-CAL_C, OFF_C = 1.00,  0.0
-VL_WARMUP = 3
-Bw = Cw = 0
-
-# ================= PARAMS =================
-CYCLE_DELAY   = 3
-SEND_INTERVAL = 15
-RESET_ON_ERR  = 5     # عدد أخطاء متتالية قبل reset
-
-# ================= STORAGE =================
-A = {"ticks":0}
-B = {"Ta":0,"Tw":0,"D":0,"n":0}
-C = {"Ta":0,"Tw":0,"D":0,"n":0}
-Dsum = {"UV":0,"LUX":0,"IR":0,"n":0}
-
-cycle_index = 0
+# ================= TIMING =================
+READ_DELAY    = 2
+SEND_INTERVAL = 30
 last_send = time.time()
-err_count = 0
 
-print("\n=== SYSTEM STARTED (STABLE MODE) ===\n")
+print("\n=== SYSTEM STARTED (A+B+C+D STABLE MODE) ===\n")
 
 # ================= MAIN LOOP =================
 while True:
     try:
-        # ---------- B ----------
-        if cycle_index == 0:
-            Ta,_ = B_air.measure()
-            Tw,_ = B_wat.measure()
-            d = B_dist.read()
-            if d:
-                Bw += 1
-                if Bw > VL_WARMUP:
-                    B["D"] += (d/10)*CAL_B + OFF_B
-            B["Ta"] += Ta; B["Tw"] += Tw; B["n"] += 1
+        # -------- Model A --------
+        Ta_out,_ = A_out.measure()
+        Ta_in,_  = A_in.measure()
+        Da = A_dis.read() or 0
+        Wa = max(0, (hxA.read() - hxA.offset) / hxA.scale)
+        time.sleep_ms(80)
 
-        # ---------- C ----------
-        elif cycle_index == 1:
-            Ta,_ = C_air.measure()
-            Tw,_ = C_wat.measure()
-            d = C_dist.read()
-            if d:
-                Cw += 1
-                if Cw > VL_WARMUP:
-                    C["D"] += (d/10)*CAL_C + OFF_C
-            C["Ta"] += Ta; C["Tw"] += Tw; C["n"] += 1
+        # -------- Model B --------
+        Tb_out,_ = B_out.measure()
+        Tb_in,_  = B_in.measure()
+        Db = B_dis.read() or 0
+        Wb = max(0, (hxB.read() - hxB.offset) / hxB.scale)
+        time.sleep_ms(80)
 
-        # ---------- D ----------
-        elif cycle_index == 2:
-            UV = D_uv.read_uv()
-            full, ir = D_lux.get_raw_luminosity()
-            lux = D_lux.calculate_lux(full, ir)
-            Dsum["UV"]+=UV; Dsum["LUX"]+=lux; Dsum["IR"]+=ir; Dsum["n"]+=1
+        # -------- Model C --------
+        Tc_out,_ = C_out.measure()
+        Tc_in,_  = C_in.measure()
+        Dc = C_dis.read() or 0
+        time.sleep_ms(80)
 
-        # ---------- A (Heartbeat) ----------
-        else:
-            A["ticks"] += 1
+        # -------- Model D --------
+        UV = D_uv.read_uv()
+        full, ir = D_lux.get_raw_luminosity()
+        lux = D_lux.calculate_lux(full, ir)
 
-        err_count = 0  # reset error counter on success
+        # -------- SEND --------
+        if time.time() - last_send >= SEND_INTERVAL:
 
-    except OSError as e:
-        print("I2C ERROR:", e)
-        err_count += 1
-        init_i2c_and_sensors()
-        time.sleep(0.5)
+            send_ts(API_A,
+                round(Ta_out,2),
+                round(Ta_in,2),
+                round(Da/10,2),
+                round(Wa,1)
+            )
 
-        if err_count >= RESET_ON_ERR:
-            print("Too many I2C errors → RESET")
-            time.sleep(2)
-            machine.reset()
-
-    cycle_index = (cycle_index + 1) % 4
-    time.sleep(CYCLE_DELAY)
-
-    # ================= SEND =================
-    if time.time() - last_send >= SEND_INTERVAL:
-        print("=== SENDING DATA ===")
-
-        send_ts(API_A, A["ticks"], cycle_index, int(time.time())%1000)
-
-        if B["n"]:
             send_ts(API_B,
-                round(B["Ta"]/B["n"],2),
-                round(B["Tw"]/B["n"],2),
-                round(B["D"]/max(B["n"],1),2)
+                round(Tb_out,2),
+                round(Tb_in,2),
+                round(Db/10,2),
+                round(Wb,1)
             )
 
-        if C["n"]:
             send_ts(API_C,
-                round(C["Ta"]/C["n"],2),
-                round(C["Tw"]/C["n"],2),
-                round(C["D"]/max(C["n"],1),2)
+                round(Tc_out,2),
+                round(Tc_in,2),
+                round(Dc/10,2)
             )
 
-        if Dsum["n"]:
             send_ts(API_D,
-                round(Dsum["UV"]/Dsum["n"],2),
-                round(Dsum["LUX"]/Dsum["n"],2),
-                round(Dsum["IR"]/Dsum["n"],2)
+                round(UV,2),
+                round(lux,2),
+                round(ir,2)
             )
 
-        A.update({"ticks":0})
-        B.update({"Ta":0,"Tw":0,"D":0,"n":0})
-        C.update({"Ta":0,"Tw":0,"D":0,"n":0})
-        Dsum.update({"UV":0,"LUX":0,"IR":0,"n":0})
+            last_send = time.time()
+            gc.collect()
 
-        last_send = time.time()
-        gc.collect()
+    except Exception as e:
+        print("ERROR:", e)
+
+    time.sleep(READ_DELAY)
