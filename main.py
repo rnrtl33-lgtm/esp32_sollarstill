@@ -148,7 +148,7 @@ hx_a.tare()
 hx_b.tare()
 hx_c.tare()
 
-print("\nSYSTEM STARTED – FINAL STABLE MODE\n")
+print("\nSYSTEM STARTED – FINAL MODE (A+B+C+D)\n")
 
 
 # =====================================================
@@ -185,11 +185,13 @@ while True:
             RELAY_PIN.value(1)   # OFF
 
         # -------- MODEL C --------
+        t_air_c, _   = air_c.measure()
+        t_water_c, _ = water_c.measure()
         dist_c = laser_c.read() / 10
         weight_c = hx_c.get_weight()
 
         print("C DIST:", dist_c, "cm")
-        send_ts(API_C, 0, 0, dist_c, weight_c)
+        send_ts(API_C, t_air_c, t_water_c, dist_c, weight_c)
 
         # -------- MODEL D --------
         uva = uv.uva_raw()
