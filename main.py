@@ -65,6 +65,7 @@ def send_ts(api, f1, f2, f3, f4):
         )
         r = urequests.get(url)
         r.close()
+        print("TS SENT:", api)
     except:
         pass
 
@@ -150,14 +151,24 @@ hx_c.tare()
 
 print("\nSYSTEM STARTED – FINAL MODE (A+B+C+D)\n")
 
+# -------- WAIT FOR WIFI ONCE --------
+print("Waiting for WiFi connection...")
+timeout = time.time() + 30
+while not wlan.isconnected() and time.time() < timeout:
+    ensure_wifi_safe()
+    time.sleep(2)
+
+if wlan.isconnected():
+    print("WiFi CONNECTED ✓")
+else:
+    print("WiFi NOT CONNECTED – running offline")
+
 
 # =====================================================
 # MAIN LOOP
 # =====================================================
 while True:
     try:
-        ensure_wifi_safe()
-
         # -------- MODEL A --------
         t_air_a, _   = air_a.measure()
         t_water_a, _ = water_a.measure()
