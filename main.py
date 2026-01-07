@@ -12,7 +12,7 @@ from tsl2591_mp import TSL2591
 # WIFI CONFIG
 # =====================================================
 SSID = "stc_wifi_8105"
-PASSWORD = "bfw6qtnu3"
+PASSWORD = "bfw6qtn7tu3"
 
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
