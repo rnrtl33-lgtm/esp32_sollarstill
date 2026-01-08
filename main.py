@@ -1,6 +1,6 @@
-from machine import Pin, SoftI2C
+from machine import Pin, SoftI2C, reset
 import time, gc, machine
-import network, urequests
+import network, urequests, os
 
 from sht30_clean import SHT30
 from vl53l0x_clean import VL53L0X
@@ -9,41 +9,10 @@ from ltr390_uva import LTR390
 from tsl2591_mp import TSL2591
 
 
-# WIFI 
 SSID = "stc_wifi_8105"
 PASSWORD = "bfw6qtn7tu3"
 
-wlan = network.WLAN(network.STA_IF)
-wlan.active(True)
-
-last_wifi_attempt = 0
-WIFI_RETRY_INTERVAL = 120  # seconds
-
-def ensure_wifi_safe():
-    global last_wifi_attempt
-
-    if wlan.isconnected():
-        return True
-
-    now = time.time()
-    if now - last_wifi_attempt < WIFI_RETRY_INTERVAL:
-        return False
-
-    last_wifi_attempt = now
-
-    try:
-        print("Reinitializing WiFi...")
-        wlan.active(False)
-        time.sleep(1)
-        wlan.active(True)
-        time.sleep(1)
-        wlan.connect(SSID, PASSWORD)
-    except:
-        pass
-
-    return False
-
-# THINGSPEAK
+GITHUB_RAW = "https://raw.githubusercontent.com/rnrt133-lgtm/esp32_solarstill/main/main.py"
 
 API_A = "EU6EE36IJ7WSVYP3"
 API_B = "E8CTAK8MCUWLVQJ2"
@@ -51,166 +20,117 @@ API_C = "Y1FWSOX7Z6YZ8QMU"
 API_D = "HG8GG8DF40LCGV99"
 
 TS_URL = "https://api.thingspeak.com/update"
-SEND_INTERVAL = 20 * 60   # 20 minutes
 
-def send_ts(api, f1, f2, f3, f4):
+SEND_INTERVAL = 180
+SAMPLE_INTERVAL = 10
+SAMPLES = SEND_INTERVAL // SAMPLE_INTERVAL
+
+AUTO_RESET_INTERVAL = 6 * 60 * 60
+BOOT_TIME = time.time()
+
+
+def connect_wifi():
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
     if not wlan.isconnected():
-        return
+        wlan.connect(SSID, PASSWORD)
+        for _ in range(20):
+            if wlan.isconnected():
+                return True
+            time.sleep(1)
+    return wlan.isconnected()
+
+
+def ota_update():
     try:
-        url = "{}?api_key={}&field1={}&field2={}&field3={}&field4={}".format(
-            TS_URL, api, f1, f2, f3, f4
-        )
-        r = urequests.get(url)
+        r = urequests.get(GITHUB_RAW)
+        if r.status_code == 200:
+            with open("main.py", "w") as f:
+                f.write(r.text)
         r.close()
-        print("TS SENT:", api)
     except:
         pass
 
 
+def send_ts(api, f1, f2, f3, f4):
+    try:
+        r = urequests.get(
+            "{}?api_key={}&field1={}&field2={}&field3={}&field4={}".format(
+                TS_URL, api, f1, f2, f3, f4
+            )
+        )
+        r.close()
+    except:
+        pass
 
-BOOT_TIME = time.time()
-AUTO_RESET_INTERVAL = 12 * 60 * 60  
 
+connect_wifi()
+ota_update()
 
-
-# I2C BUSSES
 i2c_a = SoftI2C(scl=Pin(18), sda=Pin(19))
-i2c_b = SoftI2C(scl=Pin(26), sda=Pin(25))
 i2c_c = SoftI2C(scl=Pin(14), sda=Pin(27))
 i2c_d = SoftI2C(scl=Pin(5),  sda=Pin(23))
 
-
-# MODEL A
-
-air_a   = SHT30(i2c_a, 0x45)
+air_a = SHT30(i2c_a, 0x45)
 water_a = SHT30(i2c_a, 0x44)
 laser_a = VL53L0X(i2c_a)
 hx_a = HX711(dt=34, sck=33)
-
 hx_a.offset = -124129.5
-hx_a.scale  = 641.46344
+hx_a.scale = 641.46344
+time.sleep(2)
+hx_a.tare()
 
-LASER_REF_A = 13.8
-WEIGHT_FACTOR_A = 1.53
-
-
-
-# MODEL B
-
-air_b   = SHT30(i2c_b, 0x45)
-water_b = SHT30(i2c_b, 0x44)
-laser_b = VL53L0X(i2c_b)
-hx_b = HX711(dt=35, sck=32)
-
-hx_b.offset = 1477.0
-hx_b.scale  = 389.7205
-
-LASER_REF_B = 6.3
-
-
-
-# MODEL C
-
-air_c   = SHT30(i2c_c, 0x45)
+air_c = SHT30(i2c_c, 0x45)
 water_c = SHT30(i2c_c, 0x44)
 laser_c = VL53L0X(i2c_c)
 hx_c = HX711(dt=36, sck=16)
-
 hx_c.offset = -1222087.8
-hx_c.scale  = 705.81304
-
-
-
-# MODEL D
+hx_c.scale = 705.81304
+time.sleep(2)
+hx_c.tare()
 
 uv = LTR390(i2c_d, gain=3, resolution=18)
 light = TSL2591(i2c_d, gain=0x10, integration=0x01)
 
-
-
-# RELAY (PUMP)
-RELAY_PIN = Pin(4, Pin.OUT)
-RELAY_PIN.value(1)   # OFF
-
-
-
-
-
-time.sleep(3)
-hx_a.tare()
-hx_b.tare()
-hx_c.tare()
-
-print("\nSYSTEM STARTED – FINAL MODE (A+B+C+D)\n")
-
-# -------- WAIT FOR WIFI ONCE --------
-print("Waiting for WiFi connection...")
-timeout = time.time() + 30
-while not wlan.isconnected() and time.time() < timeout:
-    ensure_wifi_safe()
-    time.sleep(2)
-
-if wlan.isconnected():
-    print("WiFi CONNECTED ✓")
-else:
-    print("WiFi NOT CONNECTED – running offline")
-
-
+sumA = [0,0,0,0]
+sumC = [0,0,0,0]
+count = 0
 
 while True:
     try:
-        # -------- MODEL A --------
-        t_air_a, _   = air_a.measure()
-        t_water_a, _ = water_a.measure()
-        raw_a = laser_a.read() / 10
-        dist_a = LASER_REF_A - raw_a
-        weight_a = hx_a.get_weight() * WEIGHT_FACTOR_A
+        Ta,_ = air_a.measure()
+        Wa,_ = water_a.measure()
+        Da = laser_a.read() / 10
+        Ga = hx_a.get_weight()
 
-        print("A DIST:", dist_a, "cm")
-        send_ts(API_A, t_air_a, t_water_a, dist_a, weight_a)
+        Tc,_ = air_c.measure()
+        Wc,_ = water_c.measure()
+        Dc = laser_c.read() / 10
+        Gc = hx_c.get_weight()
 
-        #MODEL B 
-        t_air_b, _   = air_b.measure()
-        t_water_b, _ = water_b.measure()
-        raw_b = laser_b.read() / 10
-        dist_b = LASER_REF_B - raw_b
-        weight_b = hx_b.get_weight()
+        sumA[0]+=Ta; sumA[1]+=Wa; sumA[2]+=Da; sumA[3]+=Ga
+        sumC[0]+=Tc; sumC[1]+=Wc; sumC[2]+=Dc; sumC[3]+=Gc
 
-        print("B DIST:", dist_b, "cm")
-        send_ts(API_B, t_air_b, t_water_b, dist_b, weight_b)
+        count += 1
 
-        #RELAY 
-        if dist_a > 15 or dist_b > 15:
-            RELAY_PIN.value(0)   # ON
-        else:
-            RELAY_PIN.value(1)   # OFF
+        if count >= SAMPLES:
+            avgA = [x/count for x in sumA]
+            avgC = [x/count for x in sumC]
 
-        # MODEL C 
-        t_air_c, _   = air_c.measure()
-        t_water_c, _ = water_c.measure()
-        dist_c = laser_c.read() / 10
-        weight_c = hx_c.get_weight()
+            send_ts(API_A, avgA[0], avgA[1], avgA[2], avgA[3])
+            send_ts(API_B, avgA[0], avgA[1], avgA[2], avgA[3])
+            send_ts(API_C, avgC[0], avgC[1], avgC[2], avgC[3])
+            send_ts(API_D, uv.uva_raw(), light.lux(), light.infrared(), 0)
 
-        print("C DIST:", dist_c, "cm")
-        send_ts(API_C, t_air_c, t_water_c, dist_c, weight_c)
+            sumA = [0,0,0,0]
+            sumC = [0,0,0,0]
+            count = 0
 
-        # MODEL D 
-        uva = uv.uva_raw()
-        ir  = light.infrared()
-        lux = light.lux()
-
-        send_ts(API_D, uva, lux, ir, 0)
-
-        
         if time.time() - BOOT_TIME > AUTO_RESET_INTERVAL:
-            print("AUTO RESET (12H)")
-            time.sleep(2)
             machine.reset()
 
         gc.collect()
-        time.sleep(SEND_INTERVAL)
+        time.sleep(SAMPLE_INTERVAL)
 
-    except Exception as e:
-        print("MAIN LOOP ERROR:", e)
-        gc.collect()
-        time.sleep(30)
+    except:
+        time.sleep(5)
